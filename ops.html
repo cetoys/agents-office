@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="tr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ajans Muhasebesi</title>
+<style>
+:root{--bg:#0b0e13;--panel:#121722;--line:#1e2637;--ink:#e6ecf5;--dim:#8a97ad;--acc:#5eead4;--warn:#fbbf24;--bad:#f87171;--good:#4ade80;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:12px;margin-bottom:18px}
+h1{font-size:19px;margin:0;letter-spacing:.3px}
+h1 span{color:var(--acc)}
+.sub{color:var(--dim);font-size:12px;font-family:var(--mono)}
+.spacer{flex:1}
+button{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer}
+button:hover{border-color:var(--acc);color:var(--acc)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:13px 15px}
+.card .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.7px}
+.card .v{font-size:24px;font-weight:600;margin-top:5px;font-family:var(--mono);letter-spacing:-.5px}
+.card .n{color:var(--dim);font-size:11px;margin-top:2px;font-family:var(--mono)}
+section{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:15px;margin-bottom:16px}
+section>h2{font-size:12px;text-transform:uppercase;letter-spacing:.9px;color:var(--dim);margin:0 0 12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:0 8px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px;border-bottom:1px solid rgba(30,38,55,.55);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.num{text-align:right;font-family:var(--mono);white-space:nowrap}
+.name{font-weight:600}
+.role{color:var(--dim);font-size:11px}
+.pill{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10.5px;font-family:var(--mono);border:1px solid var(--line);color:var(--dim)}
+.bar{height:6px;background:#1a2130;border-radius:4px;overflow:hidden;min-width:70px}
+.bar i{display:block;height:100%;background:var(--acc);border-radius:4px}
+.bar.w i{background:var(--warn)} .bar.b i{background:var(--bad)}
+.score{font-family:var(--mono);font-weight:600}
+.s-hi{color:var(--good)} .s-mid{color:var(--warn)} .s-lo{color:var(--bad)} .s-na{color:var(--dim);font-weight:400}
+.days{display:flex;align-items:flex-end;gap:3px;height:74px}
+.days div{flex:1;background:var(--acc);opacity:.75;border-radius:2px 2px 0 0;min-height:2px;position:relative}
+.days div:hover{opacity:1}
+.dayx{display:flex;gap:3px;color:var(--dim);font-size:9.5px;font-family:var(--mono);margin-top:5px}
+.dayx span{flex:1;text-align:center;overflow:hidden}
+.muted{color:var(--dim)}
+.err{color:var(--bad)}
+.note{color:var(--dim);font-size:11.5px;line-height:1.6;margin-top:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}.hide-s{display:none}}
+</style></head><body>
+<div class="wrap">
+<header>
+  <h1>Ajans <span>Muhasebesi</span></h1>
+  <div class="sub" id="meta">yükleniyor…</div>
+  <div class="spacer"></div>
+  <button onclick="load(1)">Yenile</button>
+</header>
+
+<div class="cards" id="cards"></div>
+
+<section>
+  <h2>Günlük tüketim — son 30 gün (USD)</h2>
+  <div class="days" id="days"></div>
+  <div class="dayx" id="daysx"></div>
+</section>
+
+<section>
+  <h2>Ajanlar — kim ne yaptı, ne yedi, ne kadar hakkı kaldı</h2>
+  <div style="overflow-x:auto"><table id="agents"></table></div>
+  <div class="note" id="agnote"></div>
+</section>
+
+<div class="grid2">
+  <section><h2>Model dağılımı</h2><div style="overflow-x:auto"><table id="models"></table></div></section>
+  <section><h2>Nereden harcandı (çalışma klasörü)</h2><div style="overflow-x:auto"><table id="projects"></table></div></section>
+</div>
+
+<section>
+  <h2>Görev kuyruğu</h2>
+  <div id="queue"></div>
+  <div style="overflow-x:auto;margin-top:10px"><table id="tasks"></table></div>
+</section>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const usd=n=>'$'+(n<0.01&&n>0?n.toFixed(4):n.toFixed(2));
+const tok=n=>n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(0)+'K':String(n||0);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function barClass(p){return p>=1?'bar b':p>=.8?'bar w':'bar'}
+
+function card(k,v,n){return `<div class="card"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n||''}</div></div>`}
+
+function render(d){
+  const u=d.usage;
+  $('meta').textContent=`${new Date(u.generatedAt).toLocaleString('tr-TR')} · ${u.sessions} oturum · bütçe penceresi ${d.config.window} · ${d.config.enforce?'sınır uygulanıyor':'sadece uyarı'}`;
+  $('cards').innerHTML=
+    card('Toplam maliyet',usd(u.total.cost),tok(u.total.tokens)+' token · '+u.total.calls+' çağrı')+
+    card('Son 5 saat',usd(u.h5.cost),tok(u.h5.tokens)+' token')+
+    card('Bugün (24s)',usd(u.d1.cost),tok(u.d1.tokens)+' token')+
+    card('Son 7 gün',usd(u.d7.cost),tok(u.d7.tokens)+' token')+
+    card('Son 30 gün',usd(u.d30.cost),tok(u.d30.tokens)+' token');
+
+  // daily bars
+  const days=[];for(let i=29;i>=0;i--){const dt=new Date(Date.now()-i*864e5).toISOString().slice(0,10);days.push([dt,u.byDay[dt]?u.byDay[dt].cost:0])}
+  const mx=Math.max(...days.map(x=>x[1]),0.0001);
+  $('days').innerHTML=days.map(([dt,c])=>`<div style="height:${Math.max(2,c/mx*100)}%" title="${dt} — ${usd(c)}"></div>`).join('');
+  $('daysx').innerHTML=days.map(([dt],i)=>`<span>${i%5===0?dt.slice(5):''}</span>`).join('');
+
+  // agents
+  const A=d.agents.slice().sort((a,b)=>b.costUSD-a.costUSD||b.tasks-a.tasks);
+  const active=A.filter(a=>a.tasks||a.costUSD>0);
+  const show=active.length?active:A.slice(0,8);
+  $('agents').innerHTML=`<thead><tr><th>Ajan</th><th class="hide-s">Dept</th><th class="num">Görev</th><th class="num">Hata</th><th class="num">Revize</th><th class="num">İlk sef. doğru</th><th class="num">Skor</th><th class="num">Token</th><th class="num">Maliyet</th><th>Bütçe (${d.config.window})</th></tr></thead><tbody>`+
+   show.map(a=>{
+     const p=a.budgetUSD?a.budgetPct:0;
+     const bud=a.budgetUSD
+       ? `<div style="display:flex;align-items:center;gap:8px"><div class="${barClass(p)}" style="flex:1"><i style="width:${Math.min(100,p*100).toFixed(0)}%"></i></div><span class="num" style="font-size:11px">${usd(a.windowCostUSD)}/${usd(a.budgetUSD)}</span></div>`
+       : `<span class="muted" style="font-size:11.5px">sınırsız</span>`;
+     const sc=a.score==null?'<span class="s-na">—</span>':`<span class="score ${a.score>=80?'s-hi':a.score>=55?'s-mid':'s-lo'}">${a.score}</span>`;
+     const ftr=a.firstTimeRight==null?'<span class="s-na">—</span>':(a.firstTimeRight*100).toFixed(0)+'%';
+     return `<tr><td><div class="name">${esc(a.name)}</div><div class="role">${esc(a.role||'')}</div></td>
+       <td class="hide-s"><span class="pill">${esc(a.department)}</span></td>
+       <td class="num">${a.tasks}</td><td class="num ${a.failed?'err':''}">${a.failed||'—'}</td><td class="num">${a.revisions||'—'}</td>
+       <td class="num">${ftr}</td><td class="num">${sc}</td>
+       <td class="num">${tok(a.tokens)}</td><td class="num">${usd(a.costUSD)}</td><td>${bud}</td></tr>`}).join('')+'</tbody>';
+  $('agnote').innerHTML=`Skor = %60 ilk seferde doğru + %40 hatasızlık; en az 3 görev bitmeden hesaplanmaz. “İlk seferde doğru” = revize istenmeden kabul edilen teslimat oranı. ${active.length?'':'<b>Henüz görev verilmemiş</b> — sayılar dolmadan skor çıkmaz.'}`;
+
+  const tbl=(el,obj,label)=>{const e=Object.entries(obj).sort((a,b)=>b[1].cost-a[1].cost).slice(0,12);
+    $(el).innerHTML=`<thead><tr><th>${label}</th><th class="num">Çağrı</th><th class="num">Token</th><th class="num">Maliyet</th></tr></thead><tbody>`+
+    (e.length?e.map(([k,v])=>`<tr><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(k)}</td><td class="num">${v.calls}</td><td class="num">${tok(v.tokens)}</td><td class="num">${usd(v.cost)}</td></tr>`).join()
+     :'<tr><td colspan="4" class="muted">veri yok</td></tr>')+'</tbody>'};
+  tbl('models',u.byModel,'Model'); tbl('projects',u.byProject,'Klasör');
+
+  const q=d.queue;
+  $('queue').innerHTML=`<span class="pill">sırada ${q.next}</span> <span class="pill">çalışıyor ${q.doing}</span> <span class="pill">bitti ${q.done}</span> <span class="pill">${q.failed?'<span class="err">hata '+q.failed+'</span>':'hata 0'}</span>`;
+  $('tasks').innerHTML=q.recent.length?`<thead><tr><th>Görev</th><th>Ajan</th><th>Durum</th><th class="num">Revize</th><th class="num hide-s">Zaman</th></tr></thead><tbody>`+
+    q.recent.map(t=>`<tr><td>${esc(t.title)}</td><td class="muted">${esc(t.agent)}</td><td>${t.error?'<span class="err">hata</span>':esc(t.state)}</td><td class="num">${t.revisions||'—'}</td><td class="num hide-s muted">${t.doneAt?new Date(t.doneAt).toLocaleString('tr-TR'):''}</td></tr>`).join('')+'</tbody>'
+    :'<tbody><tr><td class="muted">henüz görev yok</td></tr></tbody>';
+}
+async function load(force){
+  try{ const r=await fetch('/api/ops'+(force?'?reload=1':'')); render(await r.json()); }
+  catch(e){ $('meta').innerHTML='<span class="err">sunucuya ulaşılamadı: '+esc(e.message)+'</span>'; }
+}
+load(); setInterval(load,30000);
+</script></body></html>

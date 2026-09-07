@@ -1,0 +1,17 @@
+{
+  "_about": "Token defteri ve bütçeler. Kişisel değişiklikleri office.usage.local.json içine yaz (git'e girmez).",
+  "_window": "Bütçe penceresi: h5 | 1d | 7d | 30d | all",
+  "window": "7d",
+  "_defaultBudgetUSD": "Ajan başına varsayılan bütçe (USD). 0 = sınırsız.",
+  "defaultBudgetUSD": 0,
+  "_warnAt": "Bu orana gelince panelde sarı uyarı (0.8 = %80).",
+  "warnAt": 0.8,
+  "_enforce": "true ise bütçesi dolan ajan görev almaz (402 döner). false ise sadece uyarır.",
+  "enforce": true,
+  "_agents": "Ajan bazında bütçe: { \"cmail\": { \"budgetUSD\": 10 } }",
+  "agents": {},
+  "_departments": "Departman bazında bütçe: { \"marketing\": { \"budgetUSD\": 25 } }",
+  "departments": {},
+  "_prices": "Model fiyatlarını burada ezebilirsin (1M token başına USD). Boş bırakırsan usage.mjs'teki resmi liste geçerli.",
+  "prices": {}
+}

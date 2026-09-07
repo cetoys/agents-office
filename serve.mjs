@@ -33,6 +33,7 @@ import { loadRoster } from './roster.mjs';
 import { loadSkills } from './skills.mjs';
 import * as learn from './learn.mjs';
 import * as onboard from './onboard.mjs';
+import { Ops } from './ops.mjs'; // V3.4-ops: token ledger, budgets, agent scorecard
 
 const cfg = loadConfig();
 const HTML = path.join(ROOT, 'dist', 'command-centre-v2.html'); // built by build.mjs; shipped so npm start works without a build
@@ -40,7 +41,10 @@ const DATA = path.join(ROOT, 'data');
 const FILE = path.join(DATA, 'tasks.json');
 const BRAIN = cfg.brainPath;
 const NOTES_DIR = path.join(BRAIN, 'Agents Office');
-const CLI_CWD = path.join(os.tmpdir(), 'agents-office-cli'); // an empty cwd: no CLAUDE.md, no repo context
+const CLI_ROOT = path.join(os.tmpdir(), 'agents-office-cli'); // an empty cwd: no CLAUDE.md, no repo context
+// One folder per agent under that root. Claude Code names its log folder after the cwd, so this is
+// what makes per-agent token attribution possible at all — see usage.mjs.
+const cliCwd = id => { const p = path.join(CLI_ROOT, String(id || '_office')); fs.mkdirSync(p, { recursive: true }); return p; };
 const version = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { return '?'; } })();
 const RUN_TIMEOUT = Math.max(60, +cfg.timeout || 300) * 1000; // agents with tools take longer than a plain draft
 mcp.configure(cfg);
@@ -57,6 +61,9 @@ function reloadRoster() {
   Object.assign(roster, { problems: r.problems, customised: r.customised, briefed: r.briefed, files: r.files });
 }
 const refreshSkills = () => { reloadRoster(); const s = loadSkills(BRAIN, AGENTS); if (s.problems.join() !== skills.problems.join()) for (const w of s.problems) console.warn('skills:', w); skills = s; return s; };
+/* ---------- ops: the ledger, the budgets, the scorecard (ops.mjs · usage.mjs) ---------- */
+const ops = new Ops({ root: ROOT, agentDirRoot: CLI_ROOT, tasksFile: FILE, agents: AGENTS, depts: DEPTS });
+
 const leadOf = dept => AGENTS.find(a => a.department === dept && a.lead) || AGENTS.find(a => a.department === dept);
 const setupMap = () => Object.fromEntries(DEPT_KEYS.map(k => [k, onboard.isSetUp(AGENTS, skills, k)]));
 
@@ -78,13 +85,13 @@ const slug = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^
 // askX → { text, tools }: tools = the MCP/web tools the agent actually called (for the office to
 // light up). On the CLI the agent gets --allowedTools = every connected server the config allows
 // (+ web); file tools, Bash and sub-agents stay off — the office is not a coding session.
-async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RUN_TIMEOUT } = {}) {
+async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RUN_TIMEOUT, agent = '_office' } = {}) {
   if (sdk) {
     const res = await sdk.messages.create({ model: cfg.model || 'claude-opus-5', max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] });
     if (res.stop_reason === 'refusal') throw new Error('Claude declined this request');
     return { text: res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim(), tools: [] };
   }
-  fs.mkdirSync(CLI_CWD, { recursive: true });
+  const cwd = cliCwd(agent);
   const allowed = tools ? mcp.allowedTools() : [];
   const args = ['-p', user, '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--system-prompt', system,
     '--disallowedTools', 'Bash,Edit,Write,Read,Glob,Grep,Agent,NotebookEdit,Task' + (allowed.includes('WebFetch') ? '' : ',WebFetch,WebSearch')];
@@ -92,7 +99,7 @@ async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RU
   if (cfg.model) args.push('--model', cfg.model);
   const env = { ...process.env }; delete env.CLAUDECODE; // the CLI refuses to nest inside another Claude Code session
   return new Promise((resolve, reject) => {
-    const p = spawn('claude', args, { cwd: CLI_CWD, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn('claude', args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '', text = '', used = [], gotResult = false;
     const timer = setTimeout(() => { p.kill('SIGKILL'); reject(new Error(`Claude took longer than ${timeout / 1000} s`)); }, timeout);
     const feed = line => {
@@ -190,7 +197,7 @@ async function run(task, feedback) {
     `${mcp.promptText(a.tools)}\n\nCOMPANY NOTES\n${businessContext(index)}\n\nNOTES YOU READ FOR THIS TASK\n${contextText(index, read)}`;
   const user = `Task: ${task.title}\nOwner's request: ${task.text}` + (task.plan?.length ? `\nAgreed plan: ${task.plan.join(' → ')}` : '') +
     (feedback ? `\n\nThe owner reviewed your previous version and asked for changes: "${feedback}"\nPrevious version:\n${task.result}` : '');
-  const { text, tools } = await askX(system, user);
+  const { text, tools } = await askX(system, user, { agent: a.id });
   if (!text) throw new Error('Claude returned nothing');
   return { result: text, read, tools: toolKeys(tools), used: mcp.namesOf(tools), skills: skills.names(a) };
 }
@@ -214,7 +221,7 @@ async function chat(agentId, text, history) {
     'Use the company notes; say when something is not in them. If the owner asks you to look something up, use your tools. Nothing outbound is sent without the owner\'s explicit say-so.\n\n' +
     `${mcp.promptText(a.tools)}\n\nCOMPANY NOTES\n${businessContext(index)}\n\nRELEVANT NOTES\n${contextText(index, read)}\n\nYOUR RECENT TASKS\n${mine || '—'}`;
   const convo = (history || []).slice(-8).map(m => `${m.who === 'user' ? 'Owner' : a.name}: ${m.text}`).join('\n');
-  const { text: reply, tools } = await askX(system, (convo ? convo + '\n' : '') + `Owner: ${text}\n${a.name}:`, { maxTokens: 1200 });
+  const { text: reply, tools } = await askX(system, (convo ? convo + '\n' : '') + `Owner: ${text}\n${a.name}:`, { maxTokens: 1200, agent: a.id });
   return { reply, read, tools: toolKeys(tools), used: mcp.namesOf(tools) };
 }
 
@@ -241,6 +248,14 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/lessons') return json(res, 200, { dir: learn.dir(BRAIN), agents: AGENTS.map(a => ({ id: a.id, name: a.name, ...learn.read(BRAIN, a.id) })).filter(x => x.rules.length || x.oneOffs.length) });
     if (url.pathname === '/api/mcp') { if (url.searchParams.get('refresh') === '1') await mcp.discover(); else await discovering; return json(res, 200, { ...mcp.summary(), tools: backend === 'claude-cli' }); }
     if (url.pathname === '/api/brain') return json(res, 200, graph);
+    if (url.pathname === '/api/ops') { if (url.searchParams.get('reload') === '1') ops.reloadConfig(); return json(res, 200, ops.report()); }
+    if (url.pathname === '/api/ops/usage') return json(res, 200, ops.report().usage);
+    if (url.pathname === '/api/ops/agents') return json(res, 200, { agents: ops.scorecard() });
+    if (url.pathname === '/api/ops/check') return json(res, 200, ops.check(url.searchParams.get('agent') || ''));
+    if (req.method === 'GET' && (url.pathname === '/ops' || url.pathname === '/ops.html')) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(fs.readFileSync(path.join(ROOT, 'ops.html'), 'utf8'));
+    }
     if (url.pathname === '/api/tasks' && req.method === 'GET') return json(res, 200, load());
     if (url.pathname === '/api/tasks' && req.method === 'POST') {
       const { dept, text } = await body(req);
@@ -257,7 +272,11 @@ const server = http.createServer(async (req, res) => {
       const list = load(); const task = list.find(t => t.id === m[1]);
       if (!task) return json(res, 404, { error: 'no such task' });
       const { feedback } = m[2] === 'revise' ? await body(req) : {};
-      task.state = 'doing'; task.startedAt = Date.now(); save(list);
+      const gate = ops.check(task.agent); // budget: an agent over its allowance does not start
+      if (!gate.ok) { task.state = 'blocked'; task.blocked = gate; save(list);
+        return json(res, 402, { error: `Bütçe aşıldı: ${task.agent} son ${gate.window} içinde ${gate.spentUSD.toFixed(2)} / ${gate.budgetUSD} harcadı.`, gate, task }); }
+      if (m[2] === 'revise') task.revisions = (+task.revisions || 0) + 1;
+      task.state = 'doing'; task.startedAt = Date.now(); task.budget = gate; save(list);
       try {
         const { result, read, tools, used, skills: sk } = await run(task, feedback);
         Object.assign(task, { state: 'done', doneAt: Date.now(), result, read, tools, used, skills: sk, error: false });
