@@ -34,6 +34,7 @@ import { loadSkills } from './skills.mjs';
 import * as learn from './learn.mjs';
 import * as onboard from './onboard.mjs';
 import { Ops } from './ops.mjs'; // V3.4-ops: token ledger, budgets, agent scorecard
+import { rowFromUsage } from './usage.mjs';
 
 const cfg = loadConfig();
 const HTML = path.join(ROOT, 'dist', 'command-centre-v2.html'); // built by build.mjs; shipped so npm start works without a build
@@ -88,6 +89,7 @@ const slug = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^
 async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RUN_TIMEOUT, agent = '_office' } = {}) {
   if (sdk) {
     const res = await sdk.messages.create({ model: cfg.model || 'claude-opus-5', max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] });
+    if (res.usage) ops.record(agent, [rowFromUsage(agent, res.model, res.usage, { backend: 'sdk' })]);
     if (res.stop_reason === 'refusal') throw new Error('Claude declined this request');
     return { text: res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim(), tools: [] };
   }
@@ -100,13 +102,16 @@ async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RU
   const env = { ...process.env }; delete env.CLAUDECODE; // the CLI refuses to nest inside another Claude Code session
   return new Promise((resolve, reject) => {
     const p = spawn('claude', args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', err = '', text = '', used = [], gotResult = false;
-    const timer = setTimeout(() => { p.kill('SIGKILL'); reject(new Error(`Claude took longer than ${timeout / 1000} s`)); }, timeout);
+    let out = '', err = '', text = '', used = [], gotResult = false, billed = [];
+    const timer = setTimeout(() => { p.kill('SIGKILL'); ops.record(agent, billed); reject(new Error(`Claude took longer than ${timeout / 1000} s`)); }, timeout);
     const feed = line => {
       if (!line.trim()) return;
       let j; try { j = JSON.parse(line); } catch { return; }
       if (j.type === 'system' && j.subtype === 'init') mcp.fromInit(j);
       if (j.type === 'assistant' && j.message?.content) for (const b of j.message.content) if (b.type === 'tool_use' && b.name && !used.includes(b.name)) used.push(b.name);
+      // the ledger's real source: every billed assistant message, straight off the stream
+      if (j.type === 'assistant' && j.message?.usage && j.message.model !== '<synthetic>')
+        billed.push(rowFromUsage(agent, j.message.model, j.message.usage, { session: j.session_id || j.sessionId || '', side: !!j.isSidechain }));
       if (j.type === 'result') { gotResult = true; text = String(j.result || '').trim(); if (j.is_error && !text) text = ''; }
     };
     p.stdout.on('data', d => { out += d; let i; while ((i = out.indexOf('\n')) >= 0) { feed(out.slice(0, i)); out = out.slice(i + 1); } });
@@ -114,6 +119,7 @@ async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RU
     p.on('error', e => { clearTimeout(timer); reject(new Error(e.code === 'ENOENT' ? 'Claude Code is not installed (claude not found on PATH)' : e.message)); });
     p.on('close', code => {
       clearTimeout(timer); feed(out);
+      ops.record(agent, billed); // record what was spent even when the run failed
       if (code !== 0 && !gotResult) return reject(new Error(`claude exited ${code}${err ? ': ' + err.trim().slice(0, 300) : ''}`));
       if (!gotResult) { try { text = String(JSON.parse(out).result || '').trim(); } catch { text = out.trim(); } }
       resolve({ text, tools: used });
@@ -274,7 +280,7 @@ const server = http.createServer(async (req, res) => {
       const { feedback } = m[2] === 'revise' ? await body(req) : {};
       const gate = ops.check(task.agent); // budget: an agent over its allowance does not start
       if (!gate.ok) { task.state = 'blocked'; task.blocked = gate; save(list);
-        return json(res, 402, { error: `Bütçe aşıldı: ${task.agent} son ${gate.window} içinde ${gate.spentUSD.toFixed(2)} / ${gate.budgetUSD} harcadı.`, gate, task }); }
+        return json(res, 402, { error: `Bütçe aşıldı: ${task.agent} son ${gate.window} içinde $${gate.spentUSD.toFixed(2)} / $${gate.budgetUSD} harcadı.`, gate, task }); }
       if (m[2] === 'revise') task.revisions = (+task.revisions || 0) + 1;
       task.state = 'doing'; task.startedAt = Date.now(); task.budget = gate; save(list);
       try {

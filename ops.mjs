@@ -2,7 +2,7 @@
 // Sits on top of usage.mjs (what was spent) and data/tasks.json (what was produced).
 import fs from 'node:fs';
 import path from 'node:path';
-import { Ledger, summarise, spentBy, DEFAULT_PRICES, costOf } from './usage.mjs';
+import { Ledger, LiveLedger, summarise, spentBy, DEFAULT_PRICES, costOf } from './usage.mjs';
 
 const WINDOWS = { h5: 5 * 3600e3, '1d': 24 * 3600e3, '7d': 7 * 24 * 3600e3, '30d': 30 * 24 * 3600e3, all: 0 };
 
@@ -22,9 +22,19 @@ export class Ops {
     this.root = root; this.tasksFile = tasksFile; this.agents = agents; this.depts = depts;
     this.cfg = loadOpsConfig(root);
     this.ledger = new Ledger({ cachePath: path.join(root, 'data', 'usage-cache.json'), agentDirRoot, prices: this.cfg.prices });
+    // the agents' own usage, recorded by serve.mjs straight off the CLI stream
+    this.live = new LiveLedger(path.join(root, 'data', 'usage-live.jsonl'));
+    this.agentCwdRoot = this.ledger.agentDirRoot; // to keep the two sources from overlapping
   }
   reloadConfig() { this.cfg = loadOpsConfig(this.root); this.ledger.prices = this.cfg.prices; return this.cfg; }
-  rows() { return this.ledger.refresh().rows(); }
+  // every billed call, from both sources. The scan covers everything you do in Claude Code
+  // yourself; the live ledger covers what the agents did. They never overlap: the agents run
+  // with --no-session-persistence, so nothing they do reaches a session log.
+  rows() {
+    const scanned = this.ledger.refresh().rows().filter(r => !r.agent); // belt and braces
+    return scanned.concat(this.live.rows());
+  }
+  record(agent, rows) { this.live.append(rows); }
   tasks() { try { return JSON.parse(fs.readFileSync(this.tasksFile, 'utf8')); } catch { return []; } }
 
   budgetFor(agentId) {

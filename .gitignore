@@ -7,3 +7,14 @@ office.agents.local.json
 brain/Agents Office/
 .DS_Store
 *.backup-*
+
+# kisisel butce ayarlari
+office.usage.local.json
+data/usage-live.jsonl
+data/usage-cache.json
+ops.json
+smoke.log
+budget.log
+server.log
+t.json
+cc.json

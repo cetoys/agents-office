@@ -90,11 +90,11 @@ export class Ledger {
   }
   parseFile(file, fromByte) {
     const rows = [];
-    let text; try { text = fs.readFileSync(file, 'utf8'); } catch { return rows; }
-    if (fromByte) { // resume: skip what we already counted (byte offset ≈ char offset for these logs)
-      const cut = text.indexOf('\n', fromByte - 1);
-      text = cut >= 0 ? text.slice(cut + 1) : '';
-    }
+    let buf; try { buf = fs.readFileSync(file); } catch { return rows; }
+    // Byte-exact resume. These logs are UTF-8 and full of multi-byte characters, so the offset
+    // must be applied to the Buffer, never to a decoded string — a char offset silently loses lines.
+    let text = (fromByte ? buf.subarray(Math.min(fromByte, buf.length)) : buf).toString('utf8');
+    if (fromByte) { const cut = text.indexOf('\n'); text = cut >= 0 ? text.slice(cut + 1) : ''; }
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let j; try { j = JSON.parse(line); } catch { continue; }
@@ -163,7 +163,8 @@ export function summarise(rows, { prices = DEFAULT_PRICES, now = Date.now() } = 
     const ag = r.agent || '(dışarıdan)';
     add(out.byAgent[ag] ||= blank(), r, prices);
     add(out.byModel[r.model] ||= blank(), r, prices);
-    const pr = String(r.cwd || '?').replace(/\\/g, '/').split('/').filter(Boolean).slice(-1)[0] || '?';
+    const pr = r.cwd ? (String(r.cwd).replace(/\\/g, '/').split('/').filter(Boolean).slice(-1)[0] || '?')
+      : (r.agent ? 'Ajans Ofisi' : '?');
     add(out.byProject[pr] ||= blank(), r, prices);
     if (r.ts) add(out.byDay[new Date(r.ts).toISOString().slice(0, 10)] ||= blank(), r, prices);
     if (r.session) sess.add(r.session);
@@ -176,4 +177,47 @@ export function spentBy(rows, agentId, windowMs, { prices = DEFAULT_PRICES, now 
   const acc = blank();
   for (const r of rows) if (r.agent === agentId && (!windowMs || now - r.ts <= windowMs)) add(acc, r, prices);
   return acc;
+}
+
+/* ---------- the live ledger ----------
+ * Claude Code is run here with --no-session-persistence, so it writes no session log and the
+ * scan above can never see an agent's own usage. The truth is in the stream the CLI already
+ * prints back to us: every assistant message carries its `usage`. serve.mjs hands those rows
+ * here as each run finishes. This is exact, immediate, and independent of any log file.
+ */
+export class LiveLedger {
+  constructor(file) { this.file = file; this._rows = null; this._size = -1; }
+  append(rows) {
+    if (!rows || !rows.length) return;
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      fs.appendFileSync(this.file, rows.map(r => JSON.stringify(r)).join('\n') + '\n');
+      this._size = -1; // invalidate
+    } catch { /* never let bookkeeping break a run */ }
+  }
+  rows() {
+    let st; try { st = fs.statSync(this.file); } catch { return []; }
+    if (this._rows && st.size === this._size) return this._rows;
+    const out = [];
+    try {
+      for (const l of fs.readFileSync(this.file, 'utf8').split('\n')) {
+        if (!l.trim()) continue;
+        try { out.push(JSON.parse(l)); } catch { /* skip a torn line */ }
+      }
+    } catch { return []; }
+    this._rows = out; this._size = st.size;
+    return out;
+  }
+}
+// normalise one assistant message's usage block into a ledger row
+export function rowFromUsage(agent, model, u, extra = {}) {
+  return {
+    ts: Date.now(), agent: agent || null, model: model || '?',
+    in: u.input_tokens || 0,
+    out: u.output_tokens || 0,
+    cr: u.cache_read_input_tokens || 0,
+    cw5: u.cache_creation?.ephemeral_5m_input_tokens ?? (u.cache_creation_input_tokens || 0),
+    cw1h: u.cache_creation?.ephemeral_1h_input_tokens ?? 0,
+    ...extra,
+  };
 }
