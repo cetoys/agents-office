@@ -29,3 +29,6 @@ ask.log
 brief.log
 ag.json
 data/blackboard.jsonl
+office.config.local.json
+pf.log
+eng.json

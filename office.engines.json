@@ -46,5 +46,15 @@
       "host": "http://127.0.0.1:11434",
       "model": "qwen3-coder:30b"
     }
+  },
+  "_preflight": "Teslimattan once 'uydurmadan yapilabilir mi' kontrolu. Ucuz/yerel motorda kosar. Supheye dusesre GECIRIR - is durmaz.",
+  "preflight": {
+    "enabled": true,
+    "engine": "yerel-hizli",
+    "timeoutMs": 45000,
+    "skipEngines": [
+      "yerel",
+      "yerel-hizli"
+    ]
   }
 }

@@ -37,6 +37,7 @@ import * as bb from './blackboard.mjs'; // kara tahta: ajanlar arası ortak not 
 import { Ops } from './ops.mjs'; // V3.4-ops: token ledger, budgets, agent scorecard
 import { rowFromUsage } from './usage.mjs';
 import { loadEngines, callEngine } from './engines.mjs'; // bir ajan, bir motor
+import { loadPreflight, check as preflightCheck } from './preflight.mjs'; // uydurmayı kesen ön kapı
 
 const cfg = loadConfig();
 const HTML = path.join(ROOT, 'dist', 'command-centre-v2.html'); // built by build.mjs; shipped so npm start works without a build
@@ -67,6 +68,7 @@ const refreshSkills = () => { reloadRoster(); const s = loadSkills(BRAIN, AGENTS
 /* ---------- ops: the ledger, the budgets, the scorecard (ops.mjs · usage.mjs) ---------- */
 const ops = new Ops({ root: ROOT, agentDirRoot: CLI_ROOT, tasksFile: FILE, agents: AGENTS, depts: DEPTS });
 let engines = loadEngines(ROOT); // office.engines.json — hangi ajan hangi sağlayıcıda koşar
+let preflight = loadPreflight(engines);
 
 const leadOf = dept => AGENTS.find(a => a.department === dept && a.lead) || AGENTS.find(a => a.department === dept);
 const setupMap = () => Object.fromEntries(DEPT_KEYS.map(k => [k, onboard.isSetUp(AGENTS, skills, k)]));
@@ -140,6 +142,15 @@ function vaultIndex() { // name → text (vault notes + live office notes)
   for (const n of readOfficeNotes(BRAIN)) m.set(n.name, n.text);
   return m;
 }
+// SADECE senin notların — ajanların yazdığı teslimatlar hariç.
+// Neden: bir ajan uydurduğu bir fiyatı teslimata yazdı, teslimat beyne not olarak düştü, ve
+// sonraki koşularda o uydurma "şirket bilgisi" gibi okundu. Ajan çıktısı taslaktır, kanıt değil —
+// "bu bilgi elimizde var mı" sorusu yalnızca senin notlarına bakarak cevaplanmalı.
+function ownerIndex() {
+  const { notes } = readVault(BRAIN); const m = new Map();
+  for (const [name, n] of notes) m.set(name, n.text);
+  return m;
+}
 function businessContext(index) {
   const bits = [];
   for (const k of ['CLAUDE', 'index', 'business-model', 'voice']) if (index.has(k)) bits.push(`--- ${k}.md ---\n${index.get(k).slice(0, 1200)}`);
@@ -201,6 +212,16 @@ async function run(task, feedback) {
   const user = `Task: ${task.title}\nOwner's request: ${task.text}` + (task.plan?.length ? `\nAgreed plan: ${task.plan.join(' → ')}` : '') +
     (task.answer ? `\n\nSordun, sahibi cevapladı: "${task.answer}" — artık teslimatı yaz, tekrar soru sorma.` : '') +
     (feedback ? `\n\nThe owner reviewed your previous version and asked for changes: "${feedback}"\nPrevious version:\n${task.result}` : '');
+  // ÖN KAPI: pahalı ajanı çalıştırmadan önce, ucuz modelle "uydurmadan yapılabilir mi" kontrolü.
+  // Sadece ilk turda; cevaplanmış veya revize edilen görev doğrudan geçer.
+  if (!task.answer && !feedback && !preflight.skipEngines.includes((a.engine || engines.default))) {
+    const own = ownerIndex();
+    const ownRead = relevantNotes(own, a.department, task.title + ' ' + task.text);
+    const pf = await preflightCheck({ callEngine, engines, cfg: preflight, task, agent: a,
+      board: bb.fmt(ROOT, { exclude: a.id }), notes: contextText(own, ownRead) });
+    if (!pf.ok) return { result: '', question: pf.question, preflight: pf, read, tools: [], used: [], skills: skills.names(a) };
+    if (pf.skipped) console.log(`  ön kapı atlandı (${a.id}): ${pf.skipped}`);
+  }
   const { text, tools } = await askX(system, user, { agent: a.id, what: task.title });
   if (!text) throw new Error('Claude returned nothing');
   const h = bb.harvest(text);
@@ -265,7 +286,7 @@ const server = http.createServer(async (req, res) => {
       const row = bb.write(ROOT, { agent: b.agent || 'owner', agentName: b.agentName || 'SEN', kind: b.kind || 'not', text: b.text });
       return json(res, row ? 200 : 400, row || { error: 'boş not' }); }
     if (url.pathname === '/api/blackboard' && req.method === 'DELETE') { bb.clear(ROOT); return json(res, 200, { ok: true }); }
-    if (url.pathname === '/api/engines') { if (url.searchParams.get('reload') === '1') engines = loadEngines(ROOT);
+    if (url.pathname === '/api/engines') { if (url.searchParams.get('reload') === '1') { engines = loadEngines(ROOT); preflight = loadPreflight(engines); }
       return json(res, 200, { default: engines.default, engines: Object.fromEntries(Object.entries(engines.engines || {}).map(([k, v]) => [k, { kind: v.kind, label: v.label || k, model: v.model || '', needsEnv: v.apiKeyEnv || null, envSet: v.apiKeyEnv ? !!process.env[v.apiKeyEnv] : true }])),
         agents: AGENTS.map(a => ({ id: a.id, name: a.name, department: a.department, engine: (a.engine || '').trim() || engines.default, model: a.model || '' })) }); }
     if (url.pathname === '/api/ops') { if (url.searchParams.get('reload') === '1') ops.reloadConfig(); return json(res, 200, ops.report()); }
@@ -310,13 +331,14 @@ const server = http.createServer(async (req, res) => {
       if (m[2] === 'revise') task.revisions = (+task.revisions || 0) + 1;
       task.state = 'doing'; task.startedAt = Date.now(); task.budget = gate; save(list);
       try {
-        const { result, question, boardNotes, read, tools, used, skills: sk } = await run(task, feedback);
+        const { result, question, boardNotes, preflight: pf, read, tools, used, skills: sk } = await run(task, feedback);
         if (question) { // ajan tıkandı: teslimat yok, sahibine soru var
-          Object.assign(task, { state: 'waiting', askedAt: Date.now(), question, result: '', read, tools, used, skills: sk, error: false });
+          Object.assign(task, { state: 'waiting', askedAt: Date.now(), question, result: '', read, tools, used, skills: sk, error: false, preflight: pf || null });
           const ag = AGENTS.find(x => x.id === task.agent);
           bb.write(ROOT, { agent: task.agent, agentName: ag?.name, kind: 'soru', text: question, task: task.id });
           const l3 = load(); const k = l3.findIndex(t => t.id === task.id); if (k >= 0) l3[k] = task; save(l3);
           console.log(`? ${task.id} ${task.agent} soruyor: ${question.slice(0, 90)}`);
+          if (task.preflight) console.log(`  (ön kapı durdurdu, pahalı çağrı yapılmadı — eksik: ${(task.preflight.missing || []).join(', ')})`);
           return json(res, 200, task);
         }
         Object.assign(task, { state: 'done', doneAt: Date.now(), result, read, tools, used, skills: sk, error: false, boardNotes });
