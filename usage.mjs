@@ -38,6 +38,10 @@ export function priceOf(model, prices = DEFAULT_PRICES) {
   return best || UNKNOWN;
 }
 export const costOf = (r, prices) => {
+  // Motorun kendisi maliyeti bildirdiyse o geçerlidir (Ollama = 0, OpenAI uyumlu = hesaplanmış).
+  if (Number.isFinite(r.costUSD)) return r.costUSD;
+  const m = String(r.model || '');
+  if (m.startsWith('ollama/')) return 0;            // yerel model, para yok
   const p = priceOf(r.model, prices); if (!p) return 0;
   return (r.in * p.in + r.out * p.out + r.cw5 * p.cw5 + r.cw1h * p.cw1h + r.cr * p.cr) / 1e6;
 };

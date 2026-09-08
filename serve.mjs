@@ -35,6 +35,7 @@ import * as learn from './learn.mjs';
 import * as onboard from './onboard.mjs';
 import { Ops } from './ops.mjs'; // V3.4-ops: token ledger, budgets, agent scorecard
 import { rowFromUsage } from './usage.mjs';
+import { loadEngines, callEngine } from './engines.mjs'; // bir ajan, bir motor
 
 const cfg = loadConfig();
 const HTML = path.join(ROOT, 'dist', 'command-centre-v2.html'); // built by build.mjs; shipped so npm start works without a build
@@ -57,13 +58,14 @@ for (const w of skills.problems) console.warn('skills:', w);
 // the roster's editable fields are re-read too (a brief written by the lead's interview, or by hand, lands without a restart)
 function reloadRoster() {
   const r = loadRoster(BRAIN);
-  for (const a of r.agents) { const cur = AGENTS.find(x => x.id === a.id); if (cur) Object.assign(cur, { name: a.name, role: a.role, does: a.does, tools: a.tools, brief: a.brief }); }
+  for (const a of r.agents) { const cur = AGENTS.find(x => x.id === a.id); if (cur) Object.assign(cur, { name: a.name, role: a.role, does: a.does, tools: a.tools, brief: a.brief, engine: a.engine, model: a.model }); }
   if (r.problems.join() !== roster.problems.join()) for (const w of r.problems) console.warn('agents:', w);
   Object.assign(roster, { problems: r.problems, customised: r.customised, briefed: r.briefed, files: r.files });
 }
 const refreshSkills = () => { reloadRoster(); const s = loadSkills(BRAIN, AGENTS); if (s.problems.join() !== skills.problems.join()) for (const w of s.problems) console.warn('skills:', w); skills = s; return s; };
 /* ---------- ops: the ledger, the budgets, the scorecard (ops.mjs · usage.mjs) ---------- */
 const ops = new Ops({ root: ROOT, agentDirRoot: CLI_ROOT, tasksFile: FILE, agents: AGENTS, depts: DEPTS });
+let engines = loadEngines(ROOT); // office.engines.json — hangi ajan hangi sağlayıcıda koşar
 
 const leadOf = dept => AGENTS.find(a => a.department === dept && a.lead) || AGENTS.find(a => a.department === dept);
 const setupMap = () => Object.fromEntries(DEPT_KEYS.map(k => [k, onboard.isSetUp(AGENTS, skills, k)]));
@@ -86,45 +88,38 @@ const slug = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^
 // askX → { text, tools }: tools = the MCP/web tools the agent actually called (for the office to
 // light up). On the CLI the agent gets --allowedTools = every connected server the config allows
 // (+ web); file tools, Bash and sub-agents stay off — the office is not a coding session.
-async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RUN_TIMEOUT, agent = '_office' } = {}) {
-  if (sdk) {
-    const res = await sdk.messages.create({ model: cfg.model || 'claude-opus-5', max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] });
-    if (res.usage) ops.record(agent, [rowFromUsage(agent, res.model, res.usage, { backend: 'sdk' })]);
-    if (res.stop_reason === 'refusal') throw new Error('Claude declined this request');
-    return { text: res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim(), tools: [] };
-  }
-  const cwd = cliCwd(agent);
-  const allowed = tools ? mcp.allowedTools() : [];
-  const args = ['-p', user, '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--system-prompt', system,
-    '--disallowedTools', 'Bash,Edit,Write,Read,Glob,Grep,Agent,NotebookEdit,Task' + (allowed.includes('WebFetch') ? '' : ',WebFetch,WebSearch')];
-  if (allowed.length) args.push('--allowedTools', allowed.join(','));
-  if (cfg.model) args.push('--model', cfg.model);
-  const env = { ...process.env }; delete env.CLAUDECODE; // the CLI refuses to nest inside another Claude Code session
-  return new Promise((resolve, reject) => {
-    const p = spawn('claude', args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', err = '', text = '', used = [], gotResult = false, billed = [];
-    const timer = setTimeout(() => { p.kill('SIGKILL'); ops.record(agent, billed); reject(new Error(`Claude took longer than ${timeout / 1000} s`)); }, timeout);
-    const feed = line => {
-      if (!line.trim()) return;
-      let j; try { j = JSON.parse(line); } catch { return; }
-      if (j.type === 'system' && j.subtype === 'init') mcp.fromInit(j);
-      if (j.type === 'assistant' && j.message?.content) for (const b of j.message.content) if (b.type === 'tool_use' && b.name && !used.includes(b.name)) used.push(b.name);
-      // the ledger's real source: every billed assistant message, straight off the stream
-      if (j.type === 'assistant' && j.message?.usage && j.message.model !== '<synthetic>')
-        billed.push(rowFromUsage(agent, j.message.model, j.message.usage, { session: j.session_id || j.sessionId || '', side: !!j.isSidechain }));
-      if (j.type === 'result') { gotResult = true; text = String(j.result || '').trim(); if (j.is_error && !text) text = ''; }
-    };
-    p.stdout.on('data', d => { out += d; let i; while ((i = out.indexOf('\n')) >= 0) { feed(out.slice(0, i)); out = out.slice(i + 1); } });
-    p.stderr.on('data', d => { err += d; });
-    p.on('error', e => { clearTimeout(timer); reject(new Error(e.code === 'ENOENT' ? 'Claude Code is not installed (claude not found on PATH)' : e.message)); });
-    p.on('close', code => {
-      clearTimeout(timer); feed(out);
-      ops.record(agent, billed); // record what was spent even when the run failed
-      if (code !== 0 && !gotResult) return reject(new Error(`claude exited ${code}${err ? ': ' + err.trim().slice(0, 300) : ''}`));
-      if (!gotResult) { try { text = String(JSON.parse(out).result || '').trim(); } catch { text = out.trim(); } }
-      resolve({ text, tools: used });
+// LIVE: şu an kim çalışıyor. 3B ofisin masaları bunu okuyup yanıyor.
+const live = new Map(); // agent -> { agent, engine, kind, model, since, what }
+export const liveList = () => [...live.values()];
+
+async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RUN_TIMEOUT, agent = '_office', what = '' } = {}) {
+  const a = AGENTS.find(x => x.id === agent);
+  const name = (a?.engine || '').trim() || engines.default;
+  const e = engines.engines?.[name];
+  const runId = agent + ':' + Date.now();
+  live.set(runId, { agent, name: a?.name || agent, engine: name, kind: e?.kind || '?', model: a?.model || e?.model || '', since: Date.now(), what: String(what).slice(0, 120) });
+  try {
+    if (sdk && (e?.kind === 'claude-cli' || !e)) { // API anahtarı yolu: SDK
+      const res = await sdk.messages.create({ model: cfg.model || 'claude-opus-5', max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] });
+      if (res.usage) ops.record(agent, [rowFromUsage(agent, res.model, res.usage, { engine: 'sdk' })]);
+      if (res.stop_reason === 'refusal') throw new Error('Claude declined this request');
+      return { text: res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim(), tools: [], engine: 'sdk' };
+    }
+    const r = await callEngine(engines, name, {
+      system, user, agent, maxTokens, timeout,
+      modelOverride: (a?.model || '').trim() || undefined,
+      allowedTools: tools ? mcp.allowedTools() : [],
+      cwdRoot: CLI_ROOT,
+      onInit: j => mcp.fromInit(j),
     });
-  });
+    ops.record(agent, r.usage || []);
+    if (!r.text) throw new Error(`${name} boş yanıt döndü`);
+    return { text: r.text, tools: r.tools || [], engine: name, kind: r.kind, ms: r.ms };
+  } catch (err) {
+    if (err?.usage?.length) ops.record(agent, err.usage); // başarısız da olsa harcanan yazılır
+    err.message = `[${name}] ` + err.message;
+    throw err;
+  } finally { live.delete(runId); }
 }
 const ask = async (system, user, opts) => (await askX(system, user, { tools: false, ...opts })).text;
 function parseJSON(text) {
@@ -203,7 +198,7 @@ async function run(task, feedback) {
     `${mcp.promptText(a.tools)}\n\nCOMPANY NOTES\n${businessContext(index)}\n\nNOTES YOU READ FOR THIS TASK\n${contextText(index, read)}`;
   const user = `Task: ${task.title}\nOwner's request: ${task.text}` + (task.plan?.length ? `\nAgreed plan: ${task.plan.join(' → ')}` : '') +
     (feedback ? `\n\nThe owner reviewed your previous version and asked for changes: "${feedback}"\nPrevious version:\n${task.result}` : '');
-  const { text, tools } = await askX(system, user, { agent: a.id });
+  const { text, tools } = await askX(system, user, { agent: a.id, what: task.title });
   if (!text) throw new Error('Claude returned nothing');
   return { result: text, read, tools: toolKeys(tools), used: mcp.namesOf(tools), skills: skills.names(a) };
 }
@@ -254,6 +249,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/lessons') return json(res, 200, { dir: learn.dir(BRAIN), agents: AGENTS.map(a => ({ id: a.id, name: a.name, ...learn.read(BRAIN, a.id) })).filter(x => x.rules.length || x.oneOffs.length) });
     if (url.pathname === '/api/mcp') { if (url.searchParams.get('refresh') === '1') await mcp.discover(); else await discovering; return json(res, 200, { ...mcp.summary(), tools: backend === 'claude-cli' }); }
     if (url.pathname === '/api/brain') return json(res, 200, graph);
+    if (url.pathname === '/api/live') return json(res, 200, { running: liveList(), at: Date.now() });
+    if (url.pathname === '/api/engines') { if (url.searchParams.get('reload') === '1') engines = loadEngines(ROOT);
+      return json(res, 200, { default: engines.default, engines: Object.fromEntries(Object.entries(engines.engines || {}).map(([k, v]) => [k, { kind: v.kind, label: v.label || k, model: v.model || '', needsEnv: v.apiKeyEnv || null, envSet: v.apiKeyEnv ? !!process.env[v.apiKeyEnv] : true }])),
+        agents: AGENTS.map(a => ({ id: a.id, name: a.name, department: a.department, engine: (a.engine || '').trim() || engines.default, model: a.model || '' })) }); }
     if (url.pathname === '/api/ops') { if (url.searchParams.get('reload') === '1') ops.reloadConfig(); return json(res, 200, ops.report()); }
     if (url.pathname === '/api/ops/usage') return json(res, 200, ops.report().usage);
     if (url.pathname === '/api/ops/agents') return json(res, 200, { agents: ops.scorecard() });

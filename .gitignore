@@ -19,3 +19,8 @@ budget.log
 server.log
 t.json
 cc.json
+office.engines.local.json
+eng.json
+live.log
+engine.log
+oc*.log

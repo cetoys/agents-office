@@ -80,6 +80,7 @@ export class Ops {
     for (const r of rows) {
       const s = r.agent && byAgent.get(r.agent); if (!s) continue;
       s.calls++; s.tokens += r.in + r.out + r.cr + r.cw5 + r.cw1h; s.costUSD += costOf(r, this.cfg.prices);
+      if (r.engine) (s.engines ||= {})[r.engine] = ((s.engines || {})[r.engine] || 0) + 1;
     }
     for (const s of byAgent.values()) {
       const arr = secs.get(s.id) || [];

@@ -1,0 +1,50 @@
+{
+  "_about": "Motorlar: her ajan bunlardan birinde koşar. Kişisel değişiklikleri office.engines.local.json içine yaz (git'e girmez).",
+  "_apiKeys": "API anahtarı ASLA bu dosyaya yazılmaz. openai-compat motorları anahtarı yalnızca bir ortam değişkeni ADIYLA tanır (apiKeyEnv). Değerini sen tanımlarsın: setx CEREBRAS_API_KEY ...",
+  "default": "claude",
+  "engines": {
+    "claude": {
+      "kind": "claude-cli",
+      "_note": "Claude Code aboneliğin. Araç (MCP) kullanabilen tek motor.",
+      "label": "Claude",
+      "model": ""
+    },
+    "yerel": {
+      "kind": "ollama",
+      "_note": "Yerel, bedava, internetsiz. RTX 3060 12GB'in ~5GB'i bos oldugu icin sadece ~4GB'lik modeller sigar. 18GB'lik qwen3-coder:30b CUDA OOM veriyor.",
+      "label": "Ollama (yerel)",
+      "host": "http://127.0.0.1:11434",
+      "model": "hf.co/llmfan46/gemma-4-E2B-it-ultra-uncensored-heretic-GGUF:Q4_K_M"
+    },
+    "yerel-hizli": {
+      "kind": "ollama",
+      "label": "Ollama küçük",
+      "host": "http://127.0.0.1:11434",
+      "model": "hf.co/llmfan46/gemma-4-E2B-it-ultra-uncensored-heretic-GGUF:Q4_K_M"
+    },
+    "openclaw": {
+      "kind": "openclaw",
+      "_note": "OpenClaw gateway üzerinden çok sağlayıcı. Sağlayıcı kredisi bitmişse hata verir.",
+      "label": "OpenClaw",
+      "ocAgent": "main",
+      "model": ""
+    },
+    "cerebras": {
+      "kind": "openai-compat",
+      "_note": "Anahtarı sen tanımla: setx CEREBRAS_API_KEY <anahtar> ve sunucuyu yeniden başlat.",
+      "label": "Cerebras",
+      "baseUrl": "https://api.cerebras.ai/v1",
+      "apiKeyEnv": "CEREBRAS_API_KEY",
+      "model": "llama-3.3-70b",
+      "priceIn": 0,
+      "priceOut": 0
+    },
+    "yerel-buyuk": {
+      "kind": "ollama",
+      "_note": "18GB. GPU'ya sigmaz - once ComfyUI'yi kapat ya da CPU'da calistir (cok yavas).",
+      "label": "Ollama buyuk (qwen3-coder:30b)",
+      "host": "http://127.0.0.1:11434",
+      "model": "qwen3-coder:30b"
+    }
+  }
+}
