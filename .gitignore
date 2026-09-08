@@ -13,6 +13,7 @@ office.usage.local.json
 data/usage-live.jsonl
 data/usage-cache.json
 ops.json
+ops-snapshot.json
 smoke.log
 budget.log
 server.log
