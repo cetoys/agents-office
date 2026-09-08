@@ -25,3 +25,7 @@ live.log
 engine.log
 oc*.log
 live2.log 
+ask.log
+brief.log
+ag.json
+data/blackboard.jsonl

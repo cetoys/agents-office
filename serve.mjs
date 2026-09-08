@@ -33,6 +33,7 @@ import { loadRoster } from './roster.mjs';
 import { loadSkills } from './skills.mjs';
 import * as learn from './learn.mjs';
 import * as onboard from './onboard.mjs';
+import * as bb from './blackboard.mjs'; // kara tahta: ajanlar arası ortak not havuzu
 import { Ops } from './ops.mjs'; // V3.4-ops: token ledger, budgets, agent scorecard
 import { rowFromUsage } from './usage.mjs';
 import { loadEngines, callEngine } from './engines.mjs'; // bir ajan, bir motor
@@ -195,12 +196,19 @@ async function run(task, feedback) {
     'Write the finished deliverable itself, not a description of what you would do. Plain text: a short heading, then short sections or bullets. ' +
     'At most 260 words unless a skill or the owner\'s instructions set a different shape — those win. No preamble, no sign-off. Ground it in the company notes below; where a fact is missing, make a reasonable assumption and mark it (assumed). ' +
     'If you used a tool, say so in one line at the end ("Used: Gmail — searched the client thread").\n\n' +
+    `${bb.RULES}\n\nKARA TAHTA\n${bb.fmt(ROOT, { exclude: a.id })}\n\n` +
     `${mcp.promptText(a.tools)}\n\nCOMPANY NOTES\n${businessContext(index)}\n\nNOTES YOU READ FOR THIS TASK\n${contextText(index, read)}`;
   const user = `Task: ${task.title}\nOwner's request: ${task.text}` + (task.plan?.length ? `\nAgreed plan: ${task.plan.join(' → ')}` : '') +
+    (task.answer ? `\n\nSordun, sahibi cevapladı: "${task.answer}" — artık teslimatı yaz, tekrar soru sorma.` : '') +
     (feedback ? `\n\nThe owner reviewed your previous version and asked for changes: "${feedback}"\nPrevious version:\n${task.result}` : '');
   const { text, tools } = await askX(system, user, { agent: a.id, what: task.title });
   if (!text) throw new Error('Claude returned nothing');
-  return { result: text, read, tools: toolKeys(tools), used: mcp.namesOf(tools), skills: skills.names(a) };
+  const h = bb.harvest(text);
+  for (const n of h.notes) bb.write(ROOT, { ...n, agent: a.id, agentName: a.name, task: task.id });
+  // Cevabı verilmiş bir görev bir daha soru soramaz — sonsuz döngüyü burada kesiyoruz.
+  const question = task.answer ? null : h.question;
+  return { result: h.text || text, question, boardNotes: h.notes.length,
+    read, tools: toolKeys(tools), used: mcp.namesOf(tools), skills: skills.names(a) };
 }
 function writeNote(task) { // the deliverable becomes a note in the brain, linked to what was read
   fs.mkdirSync(NOTES_DIR, { recursive: true });
@@ -249,7 +257,14 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/lessons') return json(res, 200, { dir: learn.dir(BRAIN), agents: AGENTS.map(a => ({ id: a.id, name: a.name, ...learn.read(BRAIN, a.id) })).filter(x => x.rules.length || x.oneOffs.length) });
     if (url.pathname === '/api/mcp') { if (url.searchParams.get('refresh') === '1') await mcp.discover(); else await discovering; return json(res, 200, { ...mcp.summary(), tools: backend === 'claude-cli' }); }
     if (url.pathname === '/api/brain') return json(res, 200, graph);
-    if (url.pathname === '/api/live') return json(res, 200, { running: liveList(), at: Date.now() });
+    if (url.pathname === '/api/live') { const w = load().filter(t => t.state === 'waiting')
+        .map(t => ({ id: t.id, agent: t.agent, name: AGENTS.find(a => a.id === t.agent)?.name || t.agent, question: t.question, title: t.title, since: t.askedAt || 0 }));
+      return json(res, 200, { running: liveList(), waiting: w, at: Date.now() }); }
+    if (url.pathname === '/api/blackboard' && req.method === 'GET') return json(res, 200, { rows: bb.read(ROOT, +url.searchParams.get('n') || 60) });
+    if (url.pathname === '/api/blackboard' && req.method === 'POST') { const b = await body(req);
+      const row = bb.write(ROOT, { agent: b.agent || 'owner', agentName: b.agentName || 'SEN', kind: b.kind || 'not', text: b.text });
+      return json(res, row ? 200 : 400, row || { error: 'boş not' }); }
+    if (url.pathname === '/api/blackboard' && req.method === 'DELETE') { bb.clear(ROOT); return json(res, 200, { ok: true }); }
     if (url.pathname === '/api/engines') { if (url.searchParams.get('reload') === '1') engines = loadEngines(ROOT);
       return json(res, 200, { default: engines.default, engines: Object.fromEntries(Object.entries(engines.engines || {}).map(([k, v]) => [k, { kind: v.kind, label: v.label || k, model: v.model || '', needsEnv: v.apiKeyEnv || null, envSet: v.apiKeyEnv ? !!process.env[v.apiKeyEnv] : true }])),
         agents: AGENTS.map(a => ({ id: a.id, name: a.name, department: a.department, engine: (a.engine || '').trim() || engines.default, model: a.model || '' })) }); }
@@ -272,7 +287,19 @@ const server = http.createServer(async (req, res) => {
       console.log(`+ ${task.id} → ${task.agent}: ${task.title}`);
       return json(res, 200, task);
     }
-    const m = url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(run|revise))?$/);
+    const m = url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(run|revise|answer))?$/);
+    if (m && req.method === 'POST' && m[2] === 'answer') { // ajanın sorusuna sahibi cevap veriyor
+      const list = load(); const task = list.find(t => t.id === m[1]);
+      if (!task) return json(res, 404, { error: 'no such task' });
+      const { answer } = await body(req);
+      if (!answer || !String(answer).trim()) return json(res, 400, { error: 'boş cevap' });
+      task.answer = String(answer).trim(); task.state = 'next'; task.answeredAt = Date.now();
+      const ag = AGENTS.find(x => x.id === task.agent);
+      bb.write(ROOT, { agent: 'owner', agentName: 'SEN', kind: 'cevap', text: `${ag?.name || task.agent} sorusuna: ${task.answer}`, task: task.id });
+      save(list);
+      console.log(`> ${task.id} cevaplandı: ${task.answer.slice(0, 80)}`);
+      return json(res, 200, task);
+    }
     if (m && req.method === 'POST' && (m[2] === 'run' || m[2] === 'revise')) {
       const list = load(); const task = list.find(t => t.id === m[1]);
       if (!task) return json(res, 404, { error: 'no such task' });
@@ -283,8 +310,16 @@ const server = http.createServer(async (req, res) => {
       if (m[2] === 'revise') task.revisions = (+task.revisions || 0) + 1;
       task.state = 'doing'; task.startedAt = Date.now(); task.budget = gate; save(list);
       try {
-        const { result, read, tools, used, skills: sk } = await run(task, feedback);
-        Object.assign(task, { state: 'done', doneAt: Date.now(), result, read, tools, used, skills: sk, error: false });
+        const { result, question, boardNotes, read, tools, used, skills: sk } = await run(task, feedback);
+        if (question) { // ajan tıkandı: teslimat yok, sahibine soru var
+          Object.assign(task, { state: 'waiting', askedAt: Date.now(), question, result: '', read, tools, used, skills: sk, error: false });
+          const ag = AGENTS.find(x => x.id === task.agent);
+          bb.write(ROOT, { agent: task.agent, agentName: ag?.name, kind: 'soru', text: question, task: task.id });
+          const l3 = load(); const k = l3.findIndex(t => t.id === task.id); if (k >= 0) l3[k] = task; save(l3);
+          console.log(`? ${task.id} ${task.agent} soruyor: ${question.slice(0, 90)}`);
+          return json(res, 200, task);
+        }
+        Object.assign(task, { state: 'done', doneAt: Date.now(), result, read, tools, used, skills: sk, error: false, boardNotes });
         task.note = writeNote(task);
         await rebuildGraph();
       } catch (e) {
@@ -313,6 +348,71 @@ const server = http.createServer(async (req, res) => {
       }
       const r = await chat(agent, String(text).trim(), history);
       return json(res, 200, { ...r, interview: false });
+    }
+    if (url.pathname === '/api/brief' && req.method === 'POST') { // PATRON: tek talimat → iş bölümü → birleştirilmiş cevap
+      const { text, dept } = await body(req);
+      if (!text || !String(text).trim()) return json(res, 400, { error: 'boş brief' });
+      const brief = String(text).trim();
+      const pool = AGENTS.filter(a => !dept || a.department === dept);
+      const roster = pool.map(a => `${a.id} · ${a.name} (${DEPTS[a.department].name}) — ${a.does}`).join('\n');
+
+      // 1) plan
+      const planSys = `Sen ${cfg.name} ofisinin patronusun. Sahibinin tek cümlelik talimatını, ekibindeki ajanlara ` +
+        `2-4 adımlık bir iş bölümüne çevir. Adımlar SIRAYLA çalışacak; sonraki adım öncekinin çıktısını kara tahtada görecek, ` +
+        `o yüzden mantıklı bir sıra kur. Sadece JSON döndür:\n` +
+        `{"why":"tek cümle gerekçe","steps":[{"agent":"<id>","title":"<kısa başlık>","text":"<o ajana net talimat>"}]}\n\nEKİP\n${roster}`;
+      let plan; try { plan = parseJSON(await ask(planSys, `Talimat: ${brief}`, { maxTokens: 900, timeout: 180000 })); }
+      catch (e) { return json(res, 500, { error: 'patron plan üretemedi: ' + e.message }); }
+      const steps = (Array.isArray(plan.steps) ? plan.steps : []).slice(0, 4)
+        .map(x => ({ ...x, agent: pool.find(a => a.id === x.agent)?.id }))
+        .filter(x => x.agent && x.text);
+      if (!steps.length) return json(res, 500, { error: 'patron geçerli bir adım üretemedi' });
+
+      bb.write(ROOT, { agent: 'boss', agentName: 'PATRON', kind: 'karar', text: `Brief: ${brief} → ${steps.map(s2 => s2.agent).join(', ')}` });
+      console.log(`※ brief → ${steps.map(s2 => s2.agent).join(' → ')}`);
+
+      // 2) adımları sırayla çalıştır — her biri gerçek görev, bütçeye ve deftere tabi
+      const done = [];
+      for (const st of steps) {
+        const a = AGENTS.find(x => x.id === st.agent);
+        const gate = ops.check(st.agent);
+        if (!gate.ok) { done.push({ ...st, name: a.name, error: true, result: `Bütçe aşıldı ($${gate.spentUSD.toFixed(2)}/$${gate.budgetUSD})` }); continue; }
+        const task = { id: nid(), dept: a.department, agent: a.id, title: String(st.title || brief).slice(0, 90), text: st.text,
+          plan: [], eta: 10, why: plan.why || '', state: 'doing', addedAt: Date.now(), startedAt: Date.now(), by: 'patron', brief: true };
+        const l = load(); l.push(task); save(l);
+        try {
+          const r = await run(task, null);
+          if (r.question) { Object.assign(task, { state: 'waiting', askedAt: Date.now(), question: r.question, result: '' });
+            bb.write(ROOT, { agent: a.id, agentName: a.name, kind: 'soru', text: r.question, task: task.id });
+            done.push({ ...st, name: a.name, waiting: true, question: r.question, id: task.id });
+          } else {
+            Object.assign(task, { state: 'done', doneAt: Date.now(), result: r.result, read: r.read, tools: r.tools, used: r.used, skills: r.skills, error: false });
+            task.note = writeNote(task);
+            bb.write(ROOT, { agent: a.id, agentName: a.name, kind: 'not', text: r.result.replace(/\s+/g, ' ').slice(0, 300), task: task.id });
+            done.push({ ...st, name: a.name, result: r.result, id: task.id });
+          }
+        } catch (e) {
+          Object.assign(task, { state: 'done', doneAt: Date.now(), error: true, result: 'Olmadı: ' + e.message });
+          done.push({ ...st, name: a.name, error: true, result: task.result, id: task.id });
+        }
+        const l2 = load(); const i2 = l2.findIndex(t => t.id === task.id); if (i2 >= 0) l2[i2] = task; save(l2);
+      }
+      await rebuildGraph();
+
+      // 3) patron birleştirir
+      let summary = '';
+      const usable = done.filter(d => d.result && !d.error && !d.waiting);
+      if (usable.length) {
+        try {
+          summary = await ask(
+            `Sen ${cfg.name} ofisinin patronusun. Ekibinin çıktılarını sahibine tek bir cevap olarak birleştir. ` +
+            'Kim ne yaptı diye anlatma; işin kendisini ver. En fazla 200 kelime, düz metin, önsöz yok.',
+            `Sahibinin talimatı: ${brief}\n\n` + usable.map(d => `--- ${d.name} ---\n${d.result}`).join('\n\n'),
+            { maxTokens: 1200, timeout: 240000 });
+        } catch (e) { summary = '(patron birleştiremedi: ' + e.message + ')'; }
+      }
+      return json(res, 200, { brief, why: plan.why || '', steps: done, summary,
+        waiting: done.filter(d => d.waiting).map(d => ({ id: d.id, agent: d.agent, question: d.question })) });
     }
     json(res, 404, { error: 'not found' });
   } catch (e) { console.error(e); json(res, 500, { error: e.message }); }

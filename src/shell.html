@@ -143,6 +143,18 @@
   #livebar .lb-what { color: #7A7A7A; }
   #livebar .lb-t { color: #9A9A9A; font-variant-numeric: tabular-nums; }
   body.dark #livebar { background: color-mix(in srgb, var(--cream) 88%, transparent); }
+  /* soru soran ajan — sarı, tıklanır */
+  .pill.asking { border-color: #C8A438; box-shadow: 0 0 0 2px #C8A438, 0 8px 24px rgba(200,164,56,.35); }
+  #livebar .lb-ask { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 99px;
+    border: 1px solid #C8A438; background: color-mix(in srgb, #C8A438 12%, transparent); pointer-events: auto; cursor: pointer; }
+  #livebar .lb-ask u { color: #8A6A10; }
+  #askbox { position: fixed; left: 50%; transform: translateX(-50%); top: 92px; z-index: 60; display: flex; gap: 6px; align-items: center;
+    max-width: min(720px, 94vw); padding: 8px 10px; border-radius: 14px; background: var(--cream);
+    border: 1px solid #C8A438; box-shadow: 0 14px 40px rgba(21,20,20,.22); }
+  #askbox .ab-q { font-size: 11.5px; max-width: 340px; }
+  #askbox .ab-in { flex: 1; min-width: 200px; font: inherit; font-size: 12px; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--hairline); background: transparent; color: inherit; }
+  #askbox .ab-go { font: inherit; font-size: 11px; padding: 6px 12px; border-radius: 8px; border: 0; background: #C8A438; color: #fff; cursor: pointer; }
+  #askbox .ab-x { font-size: 15px; line-height: 1; padding: 2px 7px; border-radius: 8px; border: 1px solid var(--hairline); background: transparent; color: inherit; cursor: pointer; }
   .pill .star { color: #C8A438; margin-right: 4px; }
 
   /* MCP logo ring labels + click tooltip */
