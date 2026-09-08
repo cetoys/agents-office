@@ -2,6 +2,7 @@
 // Far: clean pods + agent counts (Image 1 read). Near: diorama with 3D people + holo screens (Image 2 read).
 import * as THREE from 'three';
 import { TOKENS, DEPTS, DEPT_KEYS, AGENTS, LAYOUT, WORKLINES, APPROVAL_ASKS, APPROVAL_BY_AGENT } from './data.js';
+import { initLive } from './live.js'; // gerçek koşuları masalara bağlar
 import { V1, FILE_GEN, STATS, KPIS, P, rnd, ri, person, money } from './v1data.js';
 import {
   PLINTH_H, mat, rbox, makePlinth, makeFloorTitle, makeDesk, makeChair,
@@ -1337,6 +1338,7 @@ tasks = initTasks({
   getFocused: () => focused, getZoom: () => view.zoom, getFocusDim: () => focusDim,
   toScreen: (p) => toScreen(p), reframe,
 });
+const liveLayer = initLive({ R, spawnEmote, feedPush });
 view.target.set(...overviewPos());
 addEventListener('resize', () => { if (!focused && !tween) view.target.set(...overviewPos()); });
 
@@ -1377,6 +1379,7 @@ function loop(now) {
   tickSim(now, dt);
   tickLOD();
   tasks.tick(now);
+  liveLayer.tick(now);
   mcp.tick(now, dt, view, camera, focused, focusDim);
   syncOverviewBtn();
   renderer.render(scene, camera);

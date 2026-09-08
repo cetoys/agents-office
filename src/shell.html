@@ -107,6 +107,42 @@
     transition: box-shadow .4s var(--ease), border-color .4s var(--ease);
   }
   .pill:hover { border-color: var(--ink); box-shadow: 0 8px 22px rgba(21,20,20,.18); }
+  /* CANLI: gerçekten iş yapan masa. Sahte kıpırtı değil, sunucudan gelen koşu. */
+  .pill.live {
+    border-color: var(--live-tint, #3E8E6E);
+    box-shadow: 0 0 0 1px var(--live-tint, #3E8E6E), 0 6px 20px color-mix(in srgb, var(--live-tint, #3E8E6E) 35%, transparent);
+    animation: livepulse 1.6s ease-in-out infinite;
+  }
+  .pill.live .eng {
+    margin-left: 6px; padding: 1px 6px; border-radius: 99px; font-size: 9px; letter-spacing: .06em;
+    background: var(--live-tint, #3E8E6E); color: #fff; vertical-align: 1px;
+  }
+  @keyframes livepulse {
+    0%,100% { box-shadow: 0 0 0 1px var(--live-tint,#3E8E6E), 0 6px 20px color-mix(in srgb, var(--live-tint,#3E8E6E) 30%, transparent); }
+    50%     { box-shadow: 0 0 0 2px var(--live-tint,#3E8E6E), 0 8px 30px color-mix(in srgb, var(--live-tint,#3E8E6E) 55%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) { .pill.live { animation: none; } }
+
+  /* canlı şerit — üst barın altında, kim ne yapıyor */
+  #livebar {
+    position: fixed; left: 50%; transform: translateX(-50%); top: 52px; z-index: 40;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center;
+    max-width: min(1100px, 94vw); padding: 5px 10px; border-radius: 99px;
+    background: color-mix(in srgb, var(--cream) 92%, transparent);
+    border: 1px solid var(--hairline); box-shadow: 0 6px 18px rgba(21,20,20,.10);
+    font-size: 10.5px; letter-spacing: .06em; pointer-events: none;
+    opacity: .55; transition: opacity .35s var(--ease);
+  }
+  #livebar.on { opacity: 1; }
+  #livebar .lb-idle { color: #8A8A8A; }
+  #livebar .lb-item { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 4px; border-radius: 99px; border: 1px solid color-mix(in srgb, var(--t) 40%, transparent); }
+  #livebar .lb-dot { width: 6px; height: 6px; border-radius: 99px; background: var(--t); animation: livedot 1.2s ease-in-out infinite; }
+  @keyframes livedot { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  #livebar .lb-item b { font-weight: 600; }
+  #livebar .lb-item em { font-style: normal; color: var(--t); }
+  #livebar .lb-what { color: #7A7A7A; }
+  #livebar .lb-t { color: #9A9A9A; font-variant-numeric: tabular-nums; }
+  body.dark #livebar { background: color-mix(in srgb, var(--cream) 88%, transparent); }
   .pill .star { color: #C8A438; margin-right: 4px; }
 
   /* MCP logo ring labels + click tooltip */
