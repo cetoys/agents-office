@@ -3,7 +3,9 @@
 **Son güncelleme:** 9 Eylül 2026
 **Depo:** `C:\Users\cagat\agents-office` → `github.com/cetoys/agents-office`, dal `ops-layer`
 **Beyin (Obsidian):** `C:\Users\cagat\Akyazi-Beyin`
-**Açılış:** `OFISI-AC.bat` → tarayıcı `http://localhost:4520` · ops paneli `http://localhost:4520/ops`
+**Açılış:** `OFISI-AC.bat` → tarayıcı `http://localhost:4520` · ops paneli `/ops` · **patron (telefon) `/patron`**
+**Telefondan:** iPhone'da Tailscale'i aç → `http://akyazi-home:4520/patron`
+(ya da `http://100.108.55.39:4520/patron`)
 
 Bu dosya, yeni bir sohbette sıfırdan başlayan birinin projeyi tam olarak
 devralabilmesi için yazıldı. Yeni sohbette ilk iş: **bu dosyayı okut.**
@@ -17,8 +19,33 @@ oturuyor. Ajana görev veriyorsun, masası yanıyor, çalışıyor, sorusu varsa
 duruyor ve soruyor, bitirince çıktıyı beyne yazıyor. Harcadığı token ve dolar
 ajan bazında sayılıyor.
 
-**Ne değildir:** demo değil. İçindeki hiçbir sayı uydurma değil. Sahte veri
-katmanı `a3f216a` commit'inde tamamen söküldü. Ekranda 0 görüyorsan gerçekten 0.
+**Ne değildir:** demo değil. İçindeki hiçbir sayı uydurma değil.
+
+> **9 Eylül 2026 — ikinci ve asıl temizlik (`4d74de1`).**
+> İlk temizlikte sahte katmanın yalnızca bir kısmı gitmişti. Kalanlar bulundu ve söküldü:
+> - **Kendiliğinden üreyen görevler.** `tasks.js` içindeki `tick()`, boştaki her ajana
+>   6–22 saniyede bir hazır havuzdan uydurma görev atıyordu ("Enrich 12 overnight signups"),
+>   1.5–4 dakikalık sahte ilerleme çubuğuyla bitiriyor ve %25 ihtimalle **beyne not yazıyordu**.
+>   Görülen "yapılıyormuş gibi" tam olarak buydu. `POOL`, `CHAINS`, `brainSend` — hepsi silindi.
+> - **Masa ekranları.** "▸ drafting reply — client scope question" gibi hazır satırlar
+>   (`WORKLINES`) dönüyordu; ekran başlığı da hep "● working" yazıyordu. Artık ekran
+>   departmandaki **gerçek** görev başlığını gösterir, iş yoksa **"○ boşta"** yazar.
+> - **Sahte onay istekleri.** `APPROVAL_ASKS` / `APPROVAL_BY_AGENT` (120 müşteriye zam
+>   bildirimi, $350 fatura farkı…) ve `mockupFor()`'un ürettiği sahte fatura/teklif/reklam
+>   belgeleri silindi. ⚠ artık **yalnızca** ajanın gerçekten sorduğu soruyla yanar.
+> - **MCP "veri akıyor" trafiği.** Rastgele bağlayıcı ↔ masa paket gösterisi ve açılıştaki
+>   volley söküldü. Kablolar yalnızca ajan **gerçekten** bir MCP aracı çağırınca yanar.
+> - **Sahte beyin grafiği.** `braingraph.js` içinde 46 uydurma not gömülüydü; artık kasadan
+>   üretiliyor (bugün 6 gerçek not).
+> - **Hazır sohbet cevapları.** Sunucu kapalıyken ajanlar `v1data.js`'ten hazır replikler
+>   veriyordu. Artık susar ve "ofis bağlı değil" der. `v1data.js` (uydurma şirket, hayali
+>   müşteriler, sahte KPI'lar) tamamen boşaltıldı — paket 1053 KB'den 944 KB'ye indi.
+> - **Sahte kadro adları.** 35 koltuğun 18'i hâlâ "SALES LEAD", "LEAD ENRICHER" gibi demo
+>   adları taşıyordu; gerçek kadro adlarıyla değiştirildi.
+> - **Yazma animasyonu.** İşi olmayan ajan artık **klavyeye dokunmuyor** — oturuyor,
+>   etrafa bakıyor. Yazmak "çalışıyorum" iddiasıdır; iddia yoksa animasyon da yok.
+> - **Sahte toplantı gösterisi** (X tuşu) söküldü.
+> - Simülasyon yolu tamamen kapandı: sunucu kapalıyken **görev bile eklenemez**.
 
 **Şu anki iş gerçeğin:** işleyen bir işletme yok. Gelir Uber'den geliyor.
 Uygulama üretimi yeni başladı. Oyun ve e-ticaret gelir getirmeye başlarsa
@@ -44,6 +71,22 @@ Kod anahtarı → ekrandaki ad (`src/data.js` içindeki `DEPTS`):
 ---
 
 ## 3. Mimari — hangi dosya ne yapıyor
+
+**PATRON — tek muhatabın (9 Eylül 2026, `af9702d`)**
+
+35 ajanla tek tek konuşmuyorsun. **Patronla** konuşuyorsun; işi o dağıtıyor,
+sonucu o topluyor. Sohbet **sunucuda** duruyor — telefonda başlayıp masaüstünde
+devam edebilirsin, aynı konuşma.
+
+- `patron.mjs` — patronun beyni: gerçek pano metni (`boardText`), sistem talimatı
+  (uydurma yasağı dahil), `GÖREV: <departman> | <iş>` satırlarının ayıklanması.
+- `patron.html` — telefon sayfası. 3B ofis mobilde ağır; burası sade sohbet:
+  üstte gerçek sayaçlar (koşan / sırada / soru bekleyen / biten), ajan sana soru
+  sorduğunda **telefondan cevaplayabildiğin** kutu, ve sıradaki işi otomatik koşturma.
+- Uçlar: `GET/POST/DELETE /api/patron`, sayfa `/patron` (veya `/telefon`).
+
+Patron bir iş dağıttığında bu **gerçek** görev olur: aynı yönlendirici, aynı
+bütçe kapısı, aynı token defteri. Uydurma bir "verdim" yok.
 
 **Sunucu / çekirdek**
 
@@ -157,6 +200,39 @@ Hayali stüdyo örnek skill'leri `skills/_ornek-arsiv/` altına kaldırıldı.
 
 ---
 
+## 7b. Telefondan / internetten erişim
+
+**Kurulu ve hazır — hiçbir şey değiştirmedim, değiştirmeye de gerek yok.**
+
+Bilgisayarında **Tailscale** zaten kurulu ve açık (`cetoys@` hesabı).
+Ağdaki cihazlar: `akyazi-home` (bu bilgisayar, `100.108.55.39`), `iphone181`
+(telefonun — 25 gündür çevrimdışı), bir de bir Linux makine.
+
+Yapman gereken tek şey:
+
+1. iPhone'da **Tailscale** uygulamasını aç, bağlan.
+2. Safari'de: **`http://akyazi-home:4520/patron`**
+   (MagicDNS açık; olmazsa `http://100.108.55.39:4520/patron`)
+3. Paylaş → **Ana Ekrana Ekle** — uygulama gibi açılır.
+
+Neden bu yol:
+
+- **Özel.** İnternete hiçbir şey açılmıyor. Trafik WireGuard ile şifreli,
+  sadece senin cihazların erişebiliyor. Ofis Claude CLI'yi araçlarla
+  çalıştırabildiği için, bunu şifresiz olarak halka açık internete koymak
+  ciddi bir güvenlik hatası olurdu.
+- Windows güvenlik duvarı zaten node.exe'ye "Private" profilde izin veriyor,
+  Tailscale arayüzü de Private — yani port zaten açık.
+- Fişe takılıyken bilgisayar uykuya geçmiyor (AC uyku = kapalı).
+
+**Dürüst kısıt:** ajanlar senin bilgisayarında koşuyor (Claude CLI + Ollama).
+**Bilgisayar kapalıysa ofis de kapalıdır.** Uber'e çıkarken bilgisayarı açık bırak.
+
+Not: `https://akyazi-home.tailfc3845.ts.net` adresinde bir Tailscale **Funnel**
+zaten açık ama başka bir servise (port 18792) bağlı. Ona dokunmadım.
+
+---
+
 ## 8. Açık kalanlar (yeni sohbette buradan devam)
 
 1. **Cerebras anahtarı tanımlı değil.** Kontrol edildi: `CEREBRAS_API_KEY`
@@ -191,6 +267,16 @@ Hayali stüdyo örnek skill'leri `skills/_ornek-arsiv/` altına kaldırıldı.
    görüyorsan orası gerçekten boş.
 5. **git uzakları:** `origin` = senin fork'un (`cetoys`), `upstream` =
    kaynak repo (`ajsahni`). Bu düzen bozulursa commit sonrası uyarılar geri gelir.
+
+---
+
+## 9b. Şu an en çok tıkayan şey
+
+**Kasa neredeyse boş.** Patron ilk konuşmada bunu kendi söyledi: üç iş adı
+   (GGTX, URAZPRO, n8n) dışında kasada fiyat, müşteri, süreç, maliyet **yok**.
+   Bu yüzden ekip her somut işte sana soru sormak zorunda kalıyor — sistem
+   bozuk olduğu için değil, **bilgi olmadığı için**. En çok tıkayan boşluk
+   kendi maliyetin ve fiyat listen. Bunu bir kez yazarsan üç iş de akmaya başlar.
 
 ---
 
