@@ -435,10 +435,8 @@ export function initMcp({ scene, hud, LAYOUT, DEPTS, FR, R, connectors = null })
       m.dot.setAttribute('cx', ex); m.dot.setAttribute('cy', ey);
       m.dot.setAttribute('opacity', 0.85 * wireA);
     }
-    if (now > nextModelPulse) {
-      modelPulse(Math.random() < 0.6 ? 'claude' : 'chatgpt');
-      nextModelPulse = now + 2400 + Math.random() * 3200;
-    }
+    // GERÇEK-VERİ KURALI: model kabloları kendiliğinden atmaz.
+    // modelPulse yalnızca gerçek bir çağrı olduğunda çağrılır (onToolsUsed / canlı koşu).
     for (let i = wirePulses.length - 1; i >= 0; i--) {
       const p = wirePulses[i];
       const k = (now - p.t0) / p.dur;
@@ -629,17 +627,9 @@ export function initMcp({ scene, hud, LAYOUT, DEPTS, FR, R, connectors = null })
 
     // boot/replay flourish: ONE gentle pulse per department, well spaced — a per-connector
     // volley (17 exchanges at once) read as a barrage
-    if (volleyAt && now > volleyAt) {
-      const go = !focused;
-      volleyAt = 0;
-      if (go) Object.keys(BY_DEPT).forEach((dept, i) => setTimeout(() => {
-        const its = byDept[dept], seats = docks[dept].seats;
-        if (!its.length || !seats.length) return;
-        const item = its[Math.floor(Math.random() * its.length)];
-        pulse(item, performance.now(), 0.3);
-        spawnBeam(item, seats[Math.floor(Math.random() * seats.length)], performance.now(), { scale: 0.9 });
-      }, 350 + i * 420));
-    }
+    // GERÇEK-VERİ KURALI: açılışta "her bağlantıdan veri geliyor" gösterisi söküldü.
+    // Bağlantı çubuğu kimin bağlı olduğunu gösterir; veri akışını yalnızca gerçek çağrı yakar.
+    if (volleyAt) volleyAt = 0;
 
     // current dock anchor per dept: overview anchor, lerped to the focus anchor (if any)
     // by focusDim while that dept is focused
@@ -697,18 +687,9 @@ export function initMcp({ scene, hud, LAYOUT, DEPTS, FR, R, connectors = null })
       dk.conn.style.transform = `translate(${sx}px,${sy}px) translate(-50%,-100%) scale(${pillScale})`;
       dk.conn.style.opacity = (dimmed ? 1 - 0.85 * focusDim : 1) * dockA;
 
-      // steady exchange: a random connector and a random desk trade packets both ways —
-      // the constant "connectors helping the agents" energy AJ asked for
-      if (now > dk.nextAmbient && dk.seats.length) {
-        const item = byDept[dept][Math.floor(Math.random() * n)];
-        const seat = dk.seats[Math.floor(Math.random() * dk.seats.length)];
-        const outFirst = Math.random() < 0.5;
-        pulse(item, now, 0.18);
-        spawnBeam(item, seat, now, { reverse: !outFirst, count: 3, scale: 0.8 });
-        spawnBeam(item, seat, now, { reverse: outFirst, count: 2, delay: 700, scale: 0.7 });
-        // overview wires want calm — sparse pulses; zoomed-in docks keep the busy exchange
-        dk.nextAmbient = now + (1300 + Math.random() * 1900) * (focused && focused !== 'brain' ? 1.5 : 2.8);
-      }
+      // GERÇEK-VERİ KURALI: sahte "veri akıyor" trafiği söküldü.
+      // Kablolar yalnızca bir ajan GERÇEKTEN bir MCP aracı çağırdığında yanar
+      // (onToolsUsed → pulse + spawnBeam). Kimse çalışmıyorsa kablolar sessizdir.
     }
     tickBeams(now);
     tickStreams(now, focused, focusDim);

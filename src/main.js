@@ -1,9 +1,10 @@
 // Agents Office v2 — Three.js isometric office with zoom-driven LOD
 // Far: clean pods + agent counts (Image 1 read). Near: diorama with 3D people + holo screens (Image 2 read).
 import * as THREE from 'three';
-import { TOKENS, DEPTS, DEPT_KEYS, AGENTS, LAYOUT, WORKLINES, APPROVAL_ASKS, APPROVAL_BY_AGENT } from './data.js';
+import { TOKENS, DEPTS, DEPT_KEYS, AGENTS, LAYOUT } from './data.js';
 import { initLive } from './live.js'; // gerçek koşuları masalara bağlar
-import { V1, FILE_GEN, STATS, KPIS, P, rnd, ri, person, money } from './v1data.js';
+// GERÇEK-VERİ KURALI: v1data.js (uydurma şirket, sahte müşteriler, hazır sohbetler) artık
+// hiç kullanılmıyor. Ajan kimliği tamamen sunucudaki gerçek kadrodan gelir (applyRoster).
 import {
   PLINTH_H, mat, rbox, makePlinth, makeFloorTitle, makeDesk, makeChair,
   makePerson, posePerson, poseWork, makePlant, makeServerRack, makeMeetingTable, makeWalkway, makeWarnSprite,
@@ -244,7 +245,7 @@ for (const a of AGENTS) {
     a, person, warn, pill, seat: person.position.clone(), seatRot: ANG + Math.PI,
     stand: person.position.clone().add(rot(new THREE.Vector3(1.5, 0, 0.15))),
     state: 'working', bob: Math.random() * 10, path: null, pathI: 0, speed: 9.5, ask: null,
-    v1: V1.find(x => x.id === a.id), feed: [],
+    v1: { role: '', tagline: '', greeting: '', chips: [] }, feed: [],
   };
 }
 
@@ -311,7 +312,7 @@ function tickDim(dt) {
 }
 
 /* ---------- department billboards — v1's exact agreed metric rows + amber approval row ---------- */
-const kv = id => KPIS.find(k => k.id === id).val;
+// (kv/KPIS söküldü — blok sayıları REAL'den gelir)
 let brainNotes = brain.state.notes;
 // Blok üstündeki sayılar. Hepsi GERÇEK: sunucudan gelen görev sayıları, token defteri ve
 // bekleyen sorular. Deponun demo rakamları (EMAILS SENT 128, INVOICES ISSUED 23 gibi) söküldü —
@@ -488,7 +489,7 @@ addEventListener('keydown', (e) => {
   else if (e.key === '+' || e.key === '=') zoomStep(1.5);
   else if (e.key === '-' || e.key === '_') zoomStep(1 / 1.5);
   else if (e.key === '0') zoomOut();
-  else if (e.key === 'x' || e.key === 'X') { if (!meeting) planMeeting(performance.now()); }
+  // (X kısayolu — sahte toplantı gösterisi — söküldü)
   else if (e.key >= '1' && e.key <= '6') { // jump straight to a department
     const dept = ['marketing', 'emails', 'sales', 'ops', 'fin', 'delivery'][+e.key - 1];
     if (focused !== dept) enterFocus(dept);
@@ -501,7 +502,7 @@ addEventListener('keydown', (e) => {
   }
   else if (e.key === 'v' || e.key === 'V') setCam(!document.body.classList.contains('cam'));
   else if (e.key === 'd' || e.key === 'D') setDark(!darkOn);
-  else if (e.key === 'w' || e.key === 'W') requestApproval('apay'); // demo cue: Accounts Payable asks for approval
+  // (demo kısayolu 'W' söküldü)
 });
 
 // camera mode: mid-tone backdrop for filming the screen (#cam=1 / V toggles)
@@ -580,7 +581,7 @@ function ensureChat(id) {
     { who: 'agent', text: v.greeting },
     { who: 'work', i: '⏺', text: 'session attached — live work stream below' },
   ];
-  if (FILE_GEN[id] && !(tasks && tasks.isLive())) chatHist[id].push({ who: 'file', ...FILE_GEN[id]() }); // demo-only sample file; a live office shows real deliverables
+  // (demo örnek dosyası söküldü — sohbette yalnızca gerçek çıktı görünür)
 }
 function chatPush(id, msg) {
   ensureChat(id);
@@ -606,7 +607,7 @@ function renderChat(id) {
         ${m.mock ? `<div class="a-mock">${m.mock}</div>` : ''}
         ${m.pending
           ? '<div class="a-btns"><button class="a-yes">APPROVE</button><button class="a-no">REJECT</button></div>'
-          : `<div class="a-done">${m.approved ? '✓ Approved' : '✗ Rejected'} by AJ</div>`}
+          : `<div class="a-done">${m.approved ? '✓ Onaylandı' : '✗ Reddedildi'}</div>`}
       </div>`;
     return '';
   }).join('');
@@ -618,18 +619,25 @@ function renderChat(id) {
     el.addEventListener('click', () => resolveApproval(id, false)));
   mMsgs.scrollTop = mMsgs.scrollHeight;
 }
+/* GERÇEK-VERİ KURALI: "ŞU AN" satırı, istatistikler ve grafik uydurma değildir.
+   Ajanın gerçekten koşan işi varsa onu yazar; yoksa boşta der. Sahte KPI çubukları söküldü. */
 function renderActivity(id) {
-  const r = R[id], v = r.v1;
-  const task = rnd(v.tasks || ['Working through the queue'])
-    .replace('{co}', rnd(P.co)).replace('{person}', person()).replace('{count}', ri(3, 9));
-  document.getElementById('mNow').innerHTML = `NOW &nbsp;<b>${esc(task)}</b>`;
-  document.getElementById('mStats').innerHTML = (v.stats || []).map(([l, val]) => `
-    <div class="st"><div class="st-l">${esc(l)}</div><div class="st-v">${esc(String(typeof val === 'function' ? val() : val))}</div></div>`).join('');
-  const chip = DEPTS[r.a.dept].chip;
-  const mx = Math.max(...(v.chart || [1]));
-  document.querySelector('#mChart .ch-lbl').textContent = v.chartLbl || '';
-  document.querySelector('#mChart .ch-bars').innerHTML = (v.chart || []).map(n =>
-    `<i style="height:${Math.round(n / mx * 100)}%;background:${chip}"></i>`).join('');
+  const r = R[id];
+  const mine = ((tasks && tasks.tasks) || []).filter(t => t.agent === id);
+  const doing = mine.find(t => t.state === 'doing');
+  const waiting = mine.find(t => t.state === 'waiting');
+  const queued = mine.filter(t => t.state === 'next').length;
+  const done = mine.filter(t => t.state === 'done').length;
+  const now = waiting ? 'Cevap bekliyor: ' + waiting.title
+            : doing ? doing.title
+            : 'Boşta — verilmiş iş yok';
+  document.getElementById('mNow').innerHTML = `ŞU AN &nbsp;<b>${esc(now)}</b>`;
+  const stats = [['Sırada', queued], ['Biten', done], ['Bekleyen soru', waiting ? 1 : 0]];
+  document.getElementById('mStats').innerHTML = stats.map(([l, val]) => `
+    <div class="st"><div class="st-l">${esc(l)}</div><div class="st-v">${esc(String(val))}</div></div>`).join('');
+  // (sahte KPI grafiği söküldü — gerçek ölçüm gelene kadar boş)
+  document.querySelector('#mChart .ch-lbl').textContent = '';
+  document.querySelector('#mChart .ch-bars').innerHTML = '';
   document.getElementById('mFeed').innerHTML = r.feed.map(f => `
     <div class="fe"><span class="fi">${f.i}</span><span>${esc(f.text)}</span><span class="ft">${ago(f.ts)}</span></div>`).join('');
 }
@@ -824,10 +832,9 @@ function sendChat(text) {
         .catch(e => chatPush(id, { who: 'agent', text: `I couldn't reach Claude (${e.message}).` }));
       return;
     }
-    const hit = (r.v1.chat || []).find(c => c.k.some(k => low.includes(k)));
-    const reply = hit ? rnd(hit.r) : rnd(r.v1.fallback || ['On it.']);
-    chatPush(id, { who: 'agent', text: reply });
-  }, 450 + Math.random() * 500);
+    // GERÇEK-VERİ KURALI: sunucu yoksa hazır cevap YOK. Ajan susar ve durumu söyler.
+    chatPush(id, { who: 'agent', text: 'Ofis bağlı değil — sunucu kapalı olduğu için cevap veremem. OFISI-AC.bat ile ofisi aç.' });
+  }, 250);
 }
 document.getElementById('mSend').addEventListener('click', () =>
   sendChat(document.getElementById('mIn').value));
@@ -841,86 +848,19 @@ function ago(ts) {
   return m < 1 ? 'now' : m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago';
 }
 
-/* ---------- approval mockups — show AJ exactly what he's approving ---------- */
-function mockupFor(id) {
-  const chip = DEPTS[R[id].a.dept].chip;
-  switch (id) {
-    case 'apay': return `<div class="mk mk-doc">
-      <div class="d-brand">INVOICE AUDIT — #218</div>
-      <div class="d-title">Design contractor</div>
-      <div class="d-line"><span>Invoiced</span><b>14 hrs × $110 = $1,540</b></div>
-      <div class="d-line"><span>Contract rate</span><b>$85/hr (signed 12 Mar)</b></div>
-      <div class="d-line"><span>Variance</span><b>+$350 ⚠</b></div>
-      <div class="d-line"><span>Scope</span><b>matches the brief ✓</b></div>
-      <div class="d-p">Hours and scope check out — only the rate is off, and there's no signed variation covering it. Recommend holding payment and querying the rate before it's paid.</div></div>`;
-    case 'piper': return `<div class="mk mk-doc">
-      <div class="d-brand">AGENTS OFFICE — PROPOSAL</div>
-      <div class="d-title">Ridgeline Property Group</div>
-      <div class="d-line"><span>Seats</span><b>12</b></div>
-      <div class="d-line"><span>Plan</span><b>Growth</b></div>
-      <div class="d-line"><span>Price</span><b>$1,080/mo · 12-mo lock</b></div>
-      <div class="d-p">Proof point: Auckland roofing co — 0 → 40 tracked calls/week in 14 days. Sign-online link included.</div></div>`;
-    case 'bill': return `<div class="mk mk-doc">
-      <div class="d-brand">REFUND VERIFICATION</div>
-      <div class="d-title">Harbour City Roofing — $680</div>
-      <div class="d-line"><span>Reason</span><b>double payment, two cards</b></div>
-      <div class="d-line"><span>Txn #1 / #2</span><b>verified ✓ / duplicate ✓</b></div>
-      <div class="d-line"><span>Account</span><b>14 months, good standing</b></div>
-      <div class="d-p">Legit case. Above my $500 limit — releases the moment you approve.</div></div>`;
-    case 'iggy': return `<div class="mk-phone">
-      <div class="ph-handle"></div>
-      <div class="ph-hook">“calls before 10am are a trap”</div>
-      <div class="ph-sub">connect rates nearly double 10:00–11:30am — across 40,000 dials</div>
-      <div class="ph-ui"><span>♥ 2.4k</span><span>💬 118</span><span>↗ share</span></div></div>`;
-    case 'ada': return `<div class="mk mk-ad">
-      <div class="ad-head"><div class="ad-av"></div><div><div class="ad-who">sahni.ai</div><div class="ad-sp">Sponsored</div></div></div>
-      <div class="ad-text">Cold call anxiety? Your first 5 dials decide your whole day…</div>
-      <div class="ad-media" style="background:linear-gradient(135deg, ${chip}55, ${chip}22)">“the 10am rule — call when they answer”</div>
-      <div class="ad-foot"><span class="ad-hl">Start your free trial</span><span class="ad-cta">SIGN UP</span></div>
-      <div class="ad-stat">CPA $29 · best performer · scaling to $180/day</div></div>`;
-    case 'newt': return `<div class="mk mk-mail">
-      <div class="ml-lab">SUBJECT A</div><div class="ml-sub">calls before 10am are a trap</div>
-      <div class="ml-lab">SUBJECT B</div><div class="ml-sub">we looked at 40,000 calls — call at this time</div>
-      <div class="ml-body">  before 10am ...... 11% connect
-  10:00–11:30 ...... 21% connect
-  after 4pm ........ 9% connect
-
-→ 3,400 subscribers · CTA: reply "10AM"</div></div>`;
-    case 'scout': return `<div class="mk mk-doc">
-      <div class="d-brand">OPPORTUNITY MEMO</div>
-      <div class="d-title">CallForge +8% price rise</div>
-      <div class="d-line"><span>Window</span><b>2–3 weeks</b></div>
-      <div class="d-line"><span>Play</span><b>comparison page + retargeting</b></div>
-      <div class="d-line"><span>Briefed</span><b>META ADS · PROPOSALS</b></div>
-      <div class="d-p">Their G2 reviews already flag value-for-money. Talk-track: 12-month price lock.</div></div>`;
-    case 'enzo': return `<div class="mk mk-doc">
-      <div class="d-brand">PURCHASE ORDER</div>
-      <div class="d-title">FullEnrich — 500 credits</div>
-      <div class="d-line"><span>Cost</span><b>$250 ($0.50/credit)</b></div>
-      <div class="d-line"><span>Current balance</span><b>38 credits — out tomorrow</b></div>
-      <div class="d-line"><span>Burn rate</span><b>~90/week</b></div>
-      <div class="d-p">Same card as last month. Without credits, enrichment stops and the Sales Lead runs dry.</div></div>`;
-    default: {
-      // generic: render the agent's own deliverable in a document frame
-      if (!FILE_GEN[id]) return '';
-      const f = FILE_GEN[id]();
-      return `<div class="mk mk-doc">
-        <div class="d-brand">${esc(f.name)}</div>
-        <div class="ml-body" style="border:0;margin:0;padding:6px 0 0">${esc(f.content.split('\n').slice(0, 9).join('\n'))}</div></div>`;
-    }
-  }
-}
+/* (sahte onay belgeleri mockupFor() söküldü — gösterilecek belge yalnızca gerçek çıktıdır) */
 
 /* ---------- approvals: agent STUCK → amber billboard row → chat approval message ---------- */
-function requestApproval(id) {
+// GERÇEK-VERİ KURALI: ⚠ yalnızca ajanın GERÇEKTEN sorduğu soruyla yanar.
+// Soru metni zorunlu — uydurma bir onay isteği üretilmez.
+function requestApproval(id, ask) {
   const r = R[id];
   if (!r || r.state !== 'working') return;
+  if (!ask || !String(ask).trim()) return; // soru yoksa ajan takılmaz
   r.state = 'stuck';
-  r.ask = APPROVAL_BY_AGENT[id] || sample(APPROVAL_ASKS[r.a.dept], 1)[0];
+  r.ask = String(ask).trim();
   r.warn.visible = true;
-  const hadChat = !!chatHist[id]; // fresh chats already seed the deliverable card
-  chatPush(id, { who: 'appr', text: r.ask, pending: true, mock: mockupFor(id) });
-  if (FILE_GEN[id] && hadChat) chatPush(id, { who: 'file', ...FILE_GEN[id]() });
+  chatPush(id, { who: 'appr', text: r.ask, pending: true });
   if (tasks) tasks.onStuck(id, r.ask);
   syncApprovals();
 }
@@ -975,56 +915,11 @@ document.getElementById('topAppr').addEventListener('click', () => {
 });
 
 /* ---------- event engine: weighted v1 templates → feed + chat + billboards ---------- */
-function weightedEv(evs) {
-  const tot = evs.reduce((s, e) => s + (e.p || 1), 0);
-  let x = Math.random() * tot;
-  for (const e of evs) { x -= (e.p || 1); if (x <= 0) return e; }
-  return evs[0];
-}
-function fireAgentEvent(seedTs) {
-  const ids = Object.keys(R).filter(id => R[id].v1 && R[id].v1.ev && R[id].state !== 'stuck');
-  const r = R[ids[Math.floor(Math.random() * ids.length)]];
-  const ev = weightedEv(r.v1.ev);
-  const text = ev.t();
-  r.feed.unshift({ i: ev.i, text, ts: seedTs || Date.now() });
-  if (r.feed.length > 30) r.feed.pop();
-  if (!seedTs) {
-    spawnEmote(r, ev.i); // real work events pop their icon over the desk
-    mcp.onAgentEvent(r.a.id, r.a.dept, r.seat, performance.now()); // tool tile pulses + packet beam
-    if (focused === r.a.dept) { // live-update the rail activity row
-      const line = document.querySelector(`[data-line="${r.a.id}"]`);
-      if (line) line.textContent = ev.i + ' ' + text;
-    }
-    if (chatHist[r.a.id]) chatPush(r.a.id, { who: 'work', i: ev.i, text });
-    if (ev.kpi) { const k = KPIS.find(x => x.id === ev.kpi.id); if (k) k.val += ev.kpi.n; }
-    // (deponun sahte sayaç artışları söküldü — rozetler artık gerçek defterden besleniyor)
-    if (ev.brain) brain.read(r.a.id); // not sayısı sunucudan gelir, uydurulmaz
-    updateBillboards();
-    if (modalOpen === r.a.id && modalTab === 'activity') renderActivity(r.a.id);
-  }
-}
-// (170 sahte açılış olayı söküldü — Aktivite boş başlar, gerçek işle dolar)
-for (const r of Object.values(R)) r.feed.sort((a, b) => b.ts - a.ts);
-
-/* ---------- minimal sim: work bobs, screen updates, brain meetings ---------- */
-let meeting = null; // Brain meetings fire ONLY on the X hotkey (AJ's call — demo cue, not ambient)
-let nextApprovalAt = performance.now() + 20000;
-let nextMetricAt = performance.now() + 3000;
-let nextEmoteAt = performance.now() + 2000;
-
-function planMeeting(now) {
-  const ids = Object.keys(R).filter(id => R[id].state === 'working');
-  const a = R[ids[Math.floor(Math.random() * ids.length)]];
-  let b = a;
-  while (b.a.dept === a.a.dept) b = R[ids[Math.floor(Math.random() * ids.length)]];
-  for (const [i, r] of [a, b].entries()) {
-    const d = deptRT[r.a.dept];
-    const stand = new THREE.Vector3(2 + (i ? 3.4 : -3.4), 0.12, 2 + 2.6);
-    r.path = [r.seat.clone(), d.gate.clone().setY(0.12), d.brainGate.clone().setY(0.12), stand];
-    r.pathI = 0; r.state = 'walking';
-  }
-  meeting = { a, b, phase: 'gather', endAt: 0 };
-}
+// (sahte olay üreteci weightedEv/fireAgentEvent söküldü)
+// GERÇEK-VERİ KURALI: "iki ajan beyne yürüyüp toplantı yapıyormuş gibi" gösterisi söküldü.
+// Gerçek bir toplantı yoksa kimse yürümez. meeting hep null kalır.
+let meeting = null;
+function planMeeting() { /* gösteri kaldırıldı */ }
 
 function walkStep(r, dt) {
   const cur = r.person.position, tgt = r.path[r.pathI];
@@ -1049,11 +944,18 @@ const WORK_MODES = [
   ['type', 0.30, 4000, 7500], ['read', 0.18, 3500, 6500], ['phone', 0.16, 4000, 8000],
   ['glance', 0.17, 2000, 3500], ['sip', 0.11, 2500, 4000], ['spin', 0.08, 1400, 2000],
 ];
+// GERÇEK-VERİ KURALI: yazmak "çalışıyorum" demektir. İşi olmayan ajan YAZMAZ —
+// masasında oturur, etrafa bakar. Klavye sesi yalnızca gerçek bir koşuda çıkar.
+const IDLE_MODES = [
+  ['glance', 0.45, 2600, 5200], ['sip', 0.30, 3000, 5000], ['spin', 0.25, 1600, 2400],
+];
+const isBusy = (id) => ((tasks && tasks.tasks) || []).some(t => t.agent === id && t.state === 'doing');
 function pickWorkMode(r, now) {
+  const SET = isBusy(r.a.id) ? WORK_MODES : IDLE_MODES;
   let x = Math.random();
-  for (const [mode, w, dMin, dMax] of WORK_MODES) {
+  for (const [mode, w, dMin, dMax] of SET) {
     x -= w;
-    if (x <= 0 || mode === WORK_MODES[WORK_MODES.length - 1][0]) {
+    if (x <= 0 || mode === SET[SET.length - 1][0]) {
       r.workMode = mode;
       r.modeStart = now;
       r.modeUntil = now + dMin + Math.random() * (dMax - dMin);
@@ -1191,15 +1093,33 @@ function tickSim(now, dt) {
   // never ends up with half the office stuck waving (v1 demo-safety rule)
   // (sahte onay istekleri söküldü — ⚠ yalnızca gerçek bir ajan soru sorunca yanar)
   // (sahte olay üreteci söküldü — masalar yalnızca gerçek koşuda hareketlenir, live.js sürer)
-  // rotate desk screen content — a couple of screens refresh every beat so the room reads busy
-  if (Math.floor(now / 1800) !== Math.floor((now - dt * 1000) / 1800)) {
-    const n = 1 + (Math.random() < 0.5 ? 1 : 0);
-    for (let i = 0; i < n; i++) {
-      const ss = screenSets[Math.floor(Math.random() * screenSets.length)];
-      ss.screenSet.draw(sample(WORKLINES[ss.dept], 3).map(l => l.slice(0, 28)));
+  // Masa ekranları: rastgele DEĞİL, gerçek duruma göre. Bir saniyede bir hepsi
+  // yeniden çizilir; içerik değişmediyse doku güncellenmez (boşuna iş yok).
+  if (Math.floor(now / 1000) !== Math.floor((now - dt * 1000) / 1000)) {
+    for (const ss of screenSets) {
+      const lines = deskLines(ss.dept);
+      const key = lines.join('|');
+      if (ss.last === key) continue;
+      ss.last = key;
+      ss.screenSet.draw(lines);
       ss.screenSet.tex.needsUpdate = true;
     }
   }
+}
+
+/* ---------- masa ekranı içeriği — GERÇEK ----------
+   Departmanda gerçekten koşan ya da cevap bekleyen iş varsa başlığı yazar.
+   Hiçbir iş yoksa ekran boş kalır ve "○ boşta" gösterir. Uydurma satır yoktur. */
+function deskLines(dept) {
+  const out = [];
+  const list = (tasks && tasks.tasks) || [];
+  for (const t of list) {
+    if (t.dept !== dept) continue;
+    if (t.state !== 'doing' && t.state !== 'waiting') continue;
+    out.push((t.state === 'waiting' ? '? ' : '▸ ') + String(t.title || '').slice(0, 26));
+    if (out.length >= 3) break;
+  }
+  return out;
 }
 
 /* ---------- zoom LOD + HTML overlay projection ---------- */
@@ -1333,7 +1253,7 @@ resize();
 {
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.get('zoom')) view.zoom = parseFloat(h.get('zoom')) || 1;
-  if (h.get('appr')) requestApproval(h.get('appr') === '1' ? 'apay' : h.get('appr'));
+  // (?appr= demo parametresi söküldü)
   if (h.get('view') && LAYOUT[h.get('view')]) enterFocus(h.get('view'));
   if (h.get('cam')) setCam(h.get('cam') === '1');
   if (h.get('dark') === '1' || document.body.classList.contains('dark')) setDark(true);

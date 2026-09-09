@@ -90,18 +90,21 @@ export function makeDeskScreenTexture(chip) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 160;
   const x = c.getContext('2d');
-  const draw = (lines) => {
-    // live cream screen (v1 rule: wood desks with live cream/mint screens)
+  // GERÇEK-VERİ KURALI: ekran başlığı da içeriği de gerçektir.
+  // İş yoksa ekran BOŞTA yazar — "● working" diye sahte bir meşguliyet göstermez.
+  const draw = (lines, status) => {
+    const L = Array.isArray(lines) ? lines.filter(Boolean) : [];
     x.fillStyle = '#FDFFF8'; x.fillRect(0, 0, 256, 160);
     x.fillStyle = chip; x.fillRect(0, 0, 256, 26);
-    x.fillStyle = '#151414'; x.font = 'bold 15px Menlo, monospace'; x.fillText('● working', 10, 18);
+    x.fillStyle = '#151414'; x.font = 'bold 15px Menlo, monospace';
+    x.fillText(status || (L.length ? '● çalışıyor' : '○ boşta'), 10, 18);
     x.font = '13px Menlo, monospace';
-    lines.forEach((l, i) => {
-      x.fillStyle = i === lines.length - 1 ? '#1E9070' : 'rgba(21,20,20,.78)';
+    L.forEach((l, i) => {
+      x.fillStyle = i === L.length - 1 ? '#1E9070' : 'rgba(21,20,20,.78)';
       x.fillText(l, 10, 48 + i * 22);
     });
   };
-  draw(['▸ …', '▸ …', '▸ …']);
+  draw([]);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return { tex, canvas: c, ctx: x, draw };
