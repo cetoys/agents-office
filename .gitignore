@@ -32,3 +32,5 @@ data/blackboard.jsonl
 office.config.local.json
 pf.log
 eng.json
+data/tasks-test-arsiv.json
+h.json

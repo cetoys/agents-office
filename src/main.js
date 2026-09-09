@@ -313,29 +313,20 @@ function tickDim(dt) {
 /* ---------- department billboards — v1's exact agreed metric rows + amber approval row ---------- */
 const kv = id => KPIS.find(k => k.id === id).val;
 let brainNotes = brain.state.notes;
-const BB_ROWS = {
-  emails: [
-    ['EMAILS SENT', () => STATS.emailsSent],
-    ['REPLIES DRAFTED', () => STATS.drafts]],
-  delivery: [
-    ['REPORTS SENT', () => STATS.reports],
-    ['ON TRACK', () => STATS.onTrack + ' / ' + STATS.projects]],
-  sales: [
-    ['CALLS S·A·J', () => STATS.spencer + '·' + STATS.arwin + '·' + STATS.jack],
-    ['NEW MANAGERS', () => STATS.managers],
-    ['AUTO-ONBOARDED', () => STATS.autoOnb]],
-  marketing: [
-    ['NEW INSIGHTS', () => STATS.insMkt],
-    ['COST PER USER', () => '$' + Math.round(STATS.cpa)]],
-  ops: [
-    ['PROPOSALS MADE', () => Math.round(kv('proposals'))],
-    ['NEW INSIGHTS', () => STATS.insOps]],
-  fin: [
-    ['INVOICES ISSUED', () => Math.round(kv('invoices'))],
-    ['BILLS PAID', () => STATS.billsPaid]],
-  brain: [
-    ['NOTES INDEXED', () => brainNotes.toLocaleString('en-NZ')]],
-};
+// Blok üstündeki sayılar. Hepsi GERÇEK: sunucudan gelen görev sayıları, token defteri ve
+// bekleyen sorular. Deponun demo rakamları (EMAILS SENT 128, INVOICES ISSUED 23 gibi) söküldü —
+// olmayan işi var göstermek, ofisin tamamına olan güveni bitiriyor.
+const REAL = { tok: {}, usd: {}, ask: {}, notes: null }; // dept -> değer; live.js dolduruyor
+const fmtTok = n => !n ? '—' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n);
+const fmtUsd = n => !n ? '—' : '$' + (n < 1 ? n.toFixed(2) : n.toFixed(n < 100 ? 1 : 0));
+const deptRow = k => [
+  ['TOKEN', () => fmtTok(REAL.tok[k])],
+  ['MALİYET', () => fmtUsd(REAL.usd[k])],
+  ['BEKLEYEN', () => REAL.ask[k] ? REAL.ask[k] + ' soru' : '—'],
+];
+const BB_ROWS = Object.fromEntries([...DEPT_KEYS.map(k => [k, deptRow(k)]),
+  ['brain', [['NOT', () => brainNotes.toLocaleString('tr-TR')]]]]);
+window.__REAL = REAL; // live.js buraya yazar, sonra refreshBadges() çağırır
 for (const k of [...DEPT_KEYS, 'brain']) {
   const dept = DEPTS[k];
   const n = AGENTS.filter(a => a.dept === k).length;
@@ -1006,27 +997,13 @@ function fireAgentEvent(seedTs) {
     }
     if (chatHist[r.a.id]) chatPush(r.a.id, { who: 'work', i: ev.i, text });
     if (ev.kpi) { const k = KPIS.find(x => x.id === ev.kpi.id); if (k) k.val += ev.kpi.n; }
-    const d = r.a.dept, roll = Math.random();
-    if (d === 'emails') { if (roll < 0.45) STATS.emailsSent++; else if (roll < 0.7) STATS.drafts++; }
-    else if (d === 'delivery' && roll < 0.2) STATS.reports++;
-    else if (d === 'sales') {
-      if (roll < 0.4) STATS[rnd(['spencer', 'arwin', 'jack'])]++;
-      else if (roll < 0.5) STATS.autoOnb++;
-      else if (roll < 0.56) STATS.managers++;
-    }
-    else if (d === 'marketing') {
-      if (roll < 0.18) STATS.insMkt++;
-      else if (roll < 0.5) STATS.cpa = Math.max(25, STATS.cpa + (Math.random() - 0.55) * 1.2);
-    }
-    else if (d === 'ops' && roll < 0.22) STATS.insOps++;
-    else if (d === 'fin' && roll < 0.3) STATS.billsPaid++;
-    if (ev.brain || Math.random() < 0.12) { brainNotes++; brain.read(r.a.id); } // the Brain shows the read
+    // (deponun sahte sayaç artışları söküldü — rozetler artık gerçek defterden besleniyor)
+    if (ev.brain) brain.read(r.a.id); // not sayısı sunucudan gelir, uydurulmaz
     updateBillboards();
     if (modalOpen === r.a.id && modalTab === 'activity') renderActivity(r.a.id);
   }
 }
-// seed a believable history so Activity isn't empty at boot
-for (let i = 0; i < 170; i++) fireAgentEvent(Date.now() - ri(2, 200) * 60000);
+// (170 sahte açılış olayı söküldü — Aktivite boş başlar, gerçek işle dolar)
 for (const r of Object.values(R)) r.feed.sort((a, b) => b.ts - a.ts);
 
 /* ---------- minimal sim: work bobs, screen updates, brain meetings ---------- */
@@ -1206,30 +1183,14 @@ function tickSim(now, dt) {
     }
   }
   // ambient emoji work-bubbles pop over random desks every beat or two
-  if (now > nextEmoteAt) {
-    const ids = Object.keys(R).filter(id => R[id].state === 'working');
-    if (ids.length) spawnEmote(R[ids[Math.floor(Math.random() * ids.length)]],
-      rnd(['💬', '✉️', '📈', '💡', '✓', '📞', '🔍', '📎']));
-    nextEmoteAt = now + 1200 + Math.random() * 1800;
-  }
+  // (rastgele baloncuklar söküldü — ikon yalnızca gerçek koşuda çıkar, live.js basar)
   tickEmotes(now, dt);
   tickSweep(now);
   brain.tick(now);
   // schedule a new approval request now and then — capped so a long unattended demo
   // never ends up with half the office stuck waving (v1 demo-safety rule)
-  if (now > nextApprovalAt) {
-    const pending = Object.values(R).filter(r => r.state === 'stuck').length;
-    if (pending < 2) {
-      const ids = Object.keys(R).filter(id => R[id].state === 'working' && !R[id].a.lead);
-      if (ids.length) requestApproval(ids[Math.floor(Math.random() * ids.length)]);
-    }
-    nextApprovalAt = now + 50000 + Math.random() * 40000;
-  }
-  // agent events drive everything — feed, chat streams, billboard metrics (nothing is static)
-  if (now > nextMetricAt) {
-    fireAgentEvent();
-    nextMetricAt = now + 2600 + Math.random() * 3800;
-  }
+  // (sahte onay istekleri söküldü — ⚠ yalnızca gerçek bir ajan soru sorunca yanar)
+  // (sahte olay üreteci söküldü — masalar yalnızca gerçek koşuda hareketlenir, live.js sürer)
   // rotate desk screen content — a couple of screens refresh every beat so the room reads busy
   if (Math.floor(now / 1800) !== Math.floor((now - dt * 1000) / 1800)) {
     const n = 1 + (Math.random() < 0.5 ? 1 : 0);
@@ -1330,15 +1291,33 @@ function applyRoster(agents) {
     if (modalOpen === a.id) openAgentRail(a.id, modalTab, false);
   }
 }
+// live.js gerçek sayıları getirince rozetleri tazele
+function refreshBadges() {
+  // BEYİN etiketi: not sayısı sunucudan gelen gerçek kasadan. Derlemede gömülü kalan eski
+  // sayı (kurgusal stüdyonun 46 notu) burada güncellenir.
+  const bt = deptRT.brain?.badge?.querySelector('b');
+  if (bt) { // sunucudaki gerçek kasa sayısı; graph boşsa setGraph erken çıktığı için state güncellenmiyor
+    const n = (REAL.notes ?? brain.state?.notes ?? 0).toLocaleString('tr-TR');
+    if (bt.textContent !== n) bt.textContent = n; }
+  for (const k of DEPT_KEYS) {
+    const rows = BB_ROWS[k]; if (!rows) continue;
+    rows.forEach((row, i) => {
+      const el = deptRT[k]?.badge?.querySelector(`[data-m="${k}-${i}"]`);
+      if (el) { const v = String(row[1]()); if (el.textContent !== v) el.textContent = v; }
+    });
+  }
+}
+window.__refreshBadges = refreshBadges;
+
 tasks = initTasks({
   hud, R, deptRT, RAIL_SIDE, spawnEmote, chatPush, chatHist, feedPush, zoomToApproval, enterFocus, openAgent, esc,
   brainWrite: (id, title) => brain.write(id, title), brain,
-  onLive: (h) => { document.querySelector('#topbar .brand .ver').textContent = 'BETA'; document.title = `${h.name} — Agents Office`; brain.setOwner(h.name); applyRoster(h.agents); },
+  onLive: (h) => { setTimeout(() => window.__refreshBadges?.(), 300); document.querySelector('#topbar .brand .ver').textContent = 'BETA'; document.title = `${h.name} — Agents Office`; brain.setOwner(h.name); applyRoster(h.agents); },
   onTools: (agentId, keys) => mcp.onToolsUsed(agentId, keys),
   getFocused: () => focused, getZoom: () => view.zoom, getFocusDim: () => focusDim,
   toScreen: (p) => toScreen(p), reframe,
 });
-const liveLayer = initLive({ R, spawnEmote, feedPush });
+const liveLayer = initLive({ R, spawnEmote, feedPush, AGENTS, real: REAL, onReal: refreshBadges });
 view.target.set(...overviewPos());
 addEventListener('resize', () => { if (!focused && !tween) view.target.set(...overviewPos()); });
 

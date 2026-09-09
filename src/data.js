@@ -16,12 +16,12 @@ export const TOKENS = {
 // V3.1 (5 Sep 2026, AJ): SUPPORT → EMAILS (same mint slot), new DELIVERY pod (sky) on the top axis.
 export const DEPT_KEYS = ['emails', 'sales', 'marketing', 'ops', 'fin', 'delivery'];
 export const DEPTS = {
-  emails:    { name: 'MÜŞTERİ İLETİŞİMİ', short: 'İLETİŞİM',  chip: '#5ADEB7', ink: '#1E9070', floor: '#E9F6EF' },
-  delivery:  { name: 'İÇERİK ÜRETİMİ',    short: 'İÇERİK', chip: '#8FD3F4', ink: '#2E86AB', floor: '#E6F4FB' },
-  sales:     { name: 'URAZPRO — SAHA',    short: 'URAZPRO',   chip: '#EADC8F', ink: '#A08A1E', floor: '#F6F1DA' },
-  marketing: { name: 'GGTX — E-TİCARET',  short: 'GGTX', chip: '#E69393', ink: '#C46060', floor: '#FAE9E7' },
-  fin:       { name: 'MUHASEBE',          short: 'MUHASEBE', chip: '#98A5EF', ink: '#5B66CE', floor: '#EAEDFA' },
-  ops:       { name: 'N8N DANIŞMANLIK',   short: 'N8N', chip: '#BFA2E3', ink: '#7449A9', floor: '#F2ECFA' },
+  emails:    { name: 'MÜŞTERİ',    short: 'MÜŞTERİ',  chip: '#5ADEB7', ink: '#1E9070', floor: '#E9F6EF' },
+  delivery:  { name: 'ÜRETİM',     short: 'ÜRETİM', chip: '#8FD3F4', ink: '#2E86AB', floor: '#E6F4FB' },
+  sales:     { name: 'SATIŞ',      short: 'SATIŞ',   chip: '#EADC8F', ink: '#A08A1E', floor: '#F6F1DA' },
+  marketing: { name: 'PAZARLAMA',  short: 'PAZARLAMA', chip: '#E69393', ink: '#C46060', floor: '#FAE9E7' },
+  fin:       { name: 'MUHASEBE',   short: 'MUHASEBE', chip: '#98A5EF', ink: '#5B66CE', floor: '#EAEDFA' },
+  ops:       { name: 'YÖNETİM',    short: 'YÖNETİM', chip: '#BFA2E3', ink: '#7449A9', floor: '#F2ECFA' },
   brain:     { name: 'BEYİN',             short: 'BEYİN', chip: '#D1DECD', ink: '#4C7A57', floor: '#E9EFE4' },
 };
 
@@ -83,15 +83,10 @@ export const LAYOUT = {
 
 // Department billboard metrics (v1 rule #5: live metrics float above each dept,
 // values tick green on change, "Waiting Approval" pulses amber when > 0).
+// Depo buraya uydurma başlangıç değerleri koyuyordu (EMAILS SENT 128, AD SPEND $684...).
+// Sıfırlandı: bir sayı ancak gerçekten olduysa görünür.
 export const BILLBOARDS = {
-  emails:    [{ id: 'emails',    label: 'EMAILS SENT',      val: 128 }],
-  delivery:  [{ id: 'reports',   label: 'REPORTS SENT',     val: 9 }],
-  sales:     [{ id: 'leads',     label: 'LEADS ENRICHED',   val: 47 },
-              { id: 'callhrs',   label: 'CALL HRS ROUTED',  val: 9.5, fmt: v => v.toFixed(1) + 'h', step: 0.4 }],
-  marketing: [{ id: 'adspend',   label: 'AD SPEND TODAY',   val: 684, fmt: v => '$' + Math.round(v).toLocaleString('en-NZ'), step: 12 }],
-  ops:       [{ id: 'proposals', label: 'PROPOSALS SENT',   val: 6 }],
-  fin:       [{ id: 'invoices',  label: 'INVOICES ISSUED', val: 23 }],
-  brain:     [{ id: 'notes',     label: 'NOTES INDEXED',    val: 1204, fmt: v => Math.round(v).toLocaleString('en-NZ') }],
+  emails: [], delivery: [], sales: [], marketing: [], ops: [], fin: [], brain: [],
 };
 
 // Approval asks (agent requests → AJ decides; v1 flavour).

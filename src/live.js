@@ -18,7 +18,7 @@ const ENGINE_TINT = {
 const tintOf = e => ENGINE_TINT[e] || '#7A7A7A';
 const secs = ms => (ms < 60000 ? Math.round(ms / 1000) + 's' : Math.floor(ms / 60000) + 'd ' + Math.round((ms % 60000) / 1000) + 's');
 
-export function initLive({ R, spawnEmote, feedPush }) {
+export function initLive({ R, spawnEmote, feedPush, AGENTS, real, onReal }) {
   const bar = document.createElement('div');
   bar.id = 'livebar';
   bar.innerHTML = '<span class="lb-idle">ofis boşta</span>';
@@ -93,6 +93,29 @@ export function initLive({ R, spawnEmote, feedPush }) {
     }
   }
 
+  // Gerçek sayılar: token defteri + bekleyen soru sayısı, departman bazında toplanır.
+  const deptOf = id => (AGENTS || []).find(a => a.id === id)?.dept || null;
+  let opsAt = 0;
+  async function pollOps() {
+    if (!real || Date.now() - opsAt < 15000) return;
+    opsAt = Date.now();
+    try {
+      const r = await fetch(API + '/ops', { cache: 'no-store' });
+      if (!r.ok) return;
+      const { agents = [] } = await r.json();
+      const tok = {}, usd = {};
+      for (const a of agents) {
+        const d = deptOf(a.id); if (!d) continue;
+        tok[d] = (tok[d] || 0) + (a.tokens || 0);
+        usd[d] = (usd[d] || 0) + (a.costUSD || 0);
+      }
+      Object.assign(real.tok, tok); Object.assign(real.usd, usd);
+      try { const h = await (await fetch(API + '/health', { cache: 'no-store' })).json();
+        if (Number.isFinite(h.notes)) real.notes = h.notes; } catch {}
+      onReal?.();
+    } catch {}
+  }
+
   async function poll() {
     if (stopped) return;
     try {
@@ -100,6 +123,10 @@ export function initLive({ R, spawnEmote, feedPush }) {
       if (res.ok) {
         const { running: list = [], waiting: waits = [] } = await res.json();
         waiting = waits;
+        if (real) { const ask = {};
+          for (const w of waits) { const d = deptOf(w.agent); if (d) ask[d] = (ask[d] || 0) + 1; }
+          for (const k of Object.keys(real.ask)) delete real.ask[k];
+          Object.assign(real.ask, ask); onReal?.(); }
         for (const w of waits) { const rig = R[w.agent]; if (rig?.pill) { rig.pill.classList.add('asking'); } }
         for (const id of Object.keys(R)) if (!waits.some(w => w.agent === id)) R[id]?.pill?.classList.remove('asking');
         const seen = new Set();
@@ -121,6 +148,7 @@ export function initLive({ R, spawnEmote, feedPush }) {
       }
     } catch { /* sunucu yoksa demo modundayız, sessizce geç */ }
     renderBar();
+    pollOps();
     setTimeout(poll, POLL_MS);
   }
   poll();

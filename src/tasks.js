@@ -195,35 +195,10 @@ export function initTasks(ctx) {
     return t;
   }
 
-  /* ---------- seed a believable morning ---------- */
-  {
-    const now = performance.now(), wall = Date.now();
-    for (const a of AGENTS) {
-      const r = R[a.id];
-      { // everyone is mid-task at boot: the first frame must not be a column of "just now · 3%"
-        const t = freshTask(a.id);
-        start(t, now);
-        const k = 0.05 + Math.random() * 0.8;
-        t.startedAt = now - t.dur * k;
-        t.changedAt = wall - t.dur * k;
-      }
-      const nNext = a.lead ? ri(1, 2) : ri(0, 2);
-      for (let i = 0; i < nNext; i++) {
-        const t = mk({ agent: a.id, title: pick(a.id) });
-        t.addedAt = t.changedAt = wall - ri(8, 240) * 60000;
-        t.last = 'added';
-      }
-    }
-    for (const k of DEPT_KEYS) {
-      const ids = AGENTS.filter(a => a.dept === k).map(a => a.id);
-      const n = ri(5, 9);
-      for (let i = 0; i < n; i++) {
-        const id = rnd(ids), at = wall - ri(4, 300) * 60000;
-        mk({ agent: id, title: pick(id), state: 'done', doneAt: at, changedAt: at, addedAt: at - ri(20, 90) * 60000, last: 'done' });
-      }
-      doneCount[k] = n;
-    }
-  }
+  /* ---------- açılış: BOŞ ----------
+     Depo burada her ajana sahte görev dağıtıp "inandırıcı bir sabah" kuruyordu. Söküldü.
+     Ofis boş başlar; ne görürsen gerçekten senin verdiğin iştir. */
+  for (const k of DEPT_KEYS) doneCount[k] = 0;
 
   /* ---------- badge rows (far-zoom layer): DOING · NEXT · DONE per pod ---------- */
   function rowHTML(k) {
