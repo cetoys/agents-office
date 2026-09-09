@@ -29,13 +29,15 @@ const row = (o) => ({ ts: now(), agent: o.agent || null, engine: o.engine, model
   in: o.in || 0, out: o.out || 0, cr: o.cr || 0, cw5: o.cw5 || 0, cw1h: o.cw1h || 0, costUSD: o.costUSD });
 
 /* ---------- 1. Claude Code CLI (senin aboneliğin) ---------- */
-async function claudeCli({ system, user, agent, model, maxTokens, timeout, allowedTools, cwdRoot, onInit }) {
+async function claudeCli({ system, user, agent, model, maxTokens, timeout, allowedTools, allowSkills, cwdRoot, onInit }) {
   const cwd = path.join(cwdRoot, String(agent || '_office'));
   fs.mkdirSync(cwd, { recursive: true });
   const args = ['-p', user, '--output-format', 'stream-json', '--verbose', '--no-session-persistence',
     '--system-prompt', system,
     '--disallowedTools', 'Bash,Edit,Write,Read,Glob,Grep,Agent,NotebookEdit,Task' + (allowedTools?.includes('WebFetch') ? '' : ',WebFetch,WebSearch')];
-  if (allowedTools?.length) args.push('--allowedTools', allowedTools.join(','));
+  const allow = [...(allowedTools || [])];
+  if (allowSkills) allow.push('Skill'); // kurulu eklentilerin hazır skill'leri (sales:, legal:, marketing: ...)
+  if (allow.length) args.push('--allowedTools', allow.join(','));
   if (model) args.push('--model', model);
   const env = { ...process.env }; delete env.CLAUDECODE;
 

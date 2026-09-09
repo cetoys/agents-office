@@ -62,5 +62,15 @@ export async function check({ callEngine, engines, cfg, task, agent, board, note
   if (j.ok !== false) return { ok: true };
   const question = String(j.question || '').trim();
   if (!question) return { ok: true, skipped: 'soru boş' };
-  return { ok: false, question: question.slice(0, 300), missing: Array.isArray(j.missing) ? j.missing.slice(0, 4).map(String) : [] };
+  const missing = Array.isArray(j.missing) ? j.missing.slice(0, 4).map(String) : [];
+
+  // KAPININ EMNİYETİ: küçük model "eksik" demeye meyilli. Testte, fikri görevde açıkça yazılı
+  // olan bir işi "fikir nedir?" diye durdurdu. O yüzden iddia edilen eksik, gerçekten sert
+  // listeden bir şeye benzemiyorsa kapı açılır. Yanlış yere takılan kapı, ara sıra kaçan bir
+  // uydurmadan daha çok zarar verir.
+  const HARD_RE = /(fiyat|ücret|tutar|para|bütçe|maliyet|indirim|\$|dolar|tl\b|euro|tarih|gün|hafta|termin|teslim|süre|deadline|isim|ad[ıi]\b|müşteri|kişi|firma|şirket|marka|taahhüt|garanti|sözleşme|şart|numara|no\b|hesap|sipariş|fatura|iban|adres|telefon|e-?posta|limit|kota|lisans)/i;
+  const hard = missing.filter(m => HARD_RE.test(m)) ;
+  if (missing.length && !hard.length) return { ok: true, skipped: 'eksik sert listede değil: ' + missing.join(' / ').slice(0, 120) };
+  if (!missing.length && !HARD_RE.test(question)) return { ok: true, skipped: 'soru sert listeye girmiyor' };
+  return { ok: false, question: question.slice(0, 300), missing };
 }

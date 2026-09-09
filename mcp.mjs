@@ -102,8 +102,18 @@ export function fromInit(init) {
 }
 export function list() { return servers; }
 export function usable() { return servers.filter(s => s.status === 'connected' && allowed(s)); }
-export function allowedTools() {
-  const t = usable().map(s => `mcp__${s.id}`);
+// allowedTools(agentTools) — bir ajanın gerçekten çağırabileceği araçlar.
+// Ajan roster'ında `tools` tanımlamışsa YALNIZCA onları alır. Boşsa bağlı olan her şeyi alır.
+// Neden: 17 sunucunun hepsini her ajana vermek hem pahalı hem tehlikeli — faturalama ajanının
+// Figma'ya, video ajanının Stripe'a erişmesi için bir sebep yok.
+export function allowedTools(agentTools = null) {
+  let u = usable();
+  if (Array.isArray(agentTools) && agentTools.length) {
+    const want = agentTools.map(norm);
+    const pick = u.filter(s => want.includes(norm(s.key || '')) || want.includes(norm(s.name)) || want.includes(norm(s.id)));
+    if (pick.length) u = pick; // hiçbiri eşleşmediyse kısıtlama uygulanmaz (yazım hatası ajanı kör etmesin)
+  }
+  const t = u.map(s => `mcp__${s.id}`);
   if (cfgWeb) t.push('WebSearch', 'WebFetch');
   return t;
 }

@@ -111,7 +111,9 @@ async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RU
     const r = await callEngine(engines, name, {
       system, user, agent, maxTokens, timeout,
       modelOverride: (a?.model || '').trim() || undefined,
-      allowedTools: tools ? mcp.allowedTools() : [],
+      allowedTools: tools ? mcp.allowedTools(a?.tools) : [],
+      allowSkills: tools && cfg.tools?.skills !== false, // Claude Code eklenti skill'leri
+      skillHints: a?.skills || [],
       cwdRoot: CLI_ROOT,
       onInit: j => mcp.fromInit(j),
     });

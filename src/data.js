@@ -16,12 +16,12 @@ export const TOKENS = {
 // V3.1 (5 Sep 2026, AJ): SUPPORT → EMAILS (same mint slot), new DELIVERY pod (sky) on the top axis.
 export const DEPT_KEYS = ['emails', 'sales', 'marketing', 'ops', 'fin', 'delivery'];
 export const DEPTS = {
-  emails:    { name: 'MÜŞTERİ',    short: 'MÜŞTERİ',  chip: '#5ADEB7', ink: '#1E9070', floor: '#E9F6EF' },
-  delivery:  { name: 'ÜRETİM',     short: 'ÜRETİM', chip: '#8FD3F4', ink: '#2E86AB', floor: '#E6F4FB' },
-  sales:     { name: 'SATIŞ',      short: 'SATIŞ',   chip: '#EADC8F', ink: '#A08A1E', floor: '#F6F1DA' },
-  marketing: { name: 'PAZARLAMA',  short: 'PAZARLAMA', chip: '#E69393', ink: '#C46060', floor: '#FAE9E7' },
-  fin:       { name: 'MUHASEBE',   short: 'MUHASEBE', chip: '#98A5EF', ink: '#5B66CE', floor: '#EAEDFA' },
-  ops:       { name: 'YÖNETİM',    short: 'YÖNETİM', chip: '#BFA2E3', ink: '#7449A9', floor: '#F2ECFA' },
+  emails:    { name: 'ARAŞTIRMA', short: 'ARAŞTIRMA',  chip: '#5ADEB7', ink: '#1E9070', floor: '#E9F6EF' },
+  delivery:  { name: 'ÜRÜN',      short: 'ÜRÜN', chip: '#8FD3F4', ink: '#2E86AB', floor: '#E6F4FB' },
+  sales:     { name: 'OYUN',      short: 'OYUN',   chip: '#EADC8F', ink: '#A08A1E', floor: '#F6F1DA' },
+  marketing: { name: 'BÜYÜME',    short: 'BÜYÜME', chip: '#E69393', ink: '#C46060', floor: '#FAE9E7' },
+  fin:       { name: 'PARA',      short: 'PARA', chip: '#98A5EF', ink: '#5B66CE', floor: '#EAEDFA' },
+  ops:       { name: 'E-TİCARET', short: 'E-TİCARET', chip: '#BFA2E3', ink: '#7449A9', floor: '#F2ECFA' },
   brain:     { name: 'BEYİN',             short: 'BEYİN', chip: '#D1DECD', ink: '#4C7A57', floor: '#E9EFE4' },
 };
 
