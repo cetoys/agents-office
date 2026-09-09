@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#151414">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Patron — Akyazı Ofis</title>
+<style>
+:root{--cream:#FDFFF8;--ink:#151414;--grey:#5A5A5A;--line:rgba(21,20,20,.12);--chip:#5ADEB7;--amber:#C08A2E}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%}
+body{background:var(--cream);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  display:flex;flex-direction:column;overscroll-behavior:none}
+header{position:sticky;top:0;z-index:5;background:var(--cream);border-bottom:1px solid var(--line);
+  padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;display:flex;align-items:center;gap:10px}
+header b{font-size:16px;letter-spacing:.02em}
+header .st{margin-left:auto;font-size:12px;color:var(--grey);display:flex;align-items:center;gap:6px}
+header .dot{width:7px;height:7px;border-radius:50%;background:#bbb}
+header .dot.on{background:var(--chip)}
+#board{padding:8px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--grey);display:none}
+#board.on{display:block}
+#board .r{display:flex;gap:8px;padding:2px 0}
+#board .r b{color:var(--ink);font-weight:600}
+#msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch}
+.m{max-width:88%;padding:10px 13px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word}
+.m.sen{align-self:flex-end;background:var(--ink);color:var(--cream);border-bottom-right-radius:5px}
+.m.patron{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:5px}
+.m.sys{align-self:center;background:transparent;color:var(--grey);font-size:12.5px;text-align:center;max-width:100%}
+.m.err{align-self:center;background:#fdeeee;border:1px solid #f2c9c9;color:#8a2b2b;font-size:13px}
+.q{align-self:flex-start;max-width:92%;background:#fff8e8;border:1px solid #ecd9ab;border-radius:14px;padding:11px 13px}
+.q .who{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);font-weight:700}
+.q .t{margin:4px 0 8px}
+.q input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff}
+.q button{margin-top:7px;padding:8px 14px;border:0;border-radius:10px;background:var(--ink);color:var(--cream);font:600 14px/1 inherit}
+footer{position:sticky;bottom:0;background:var(--cream);border-top:1px solid var(--line);
+  padding:9px 12px calc(env(safe-area-inset-bottom) + 9px);display:flex;gap:8px;align-items:flex-end}
+#in{flex:1;min-height:42px;max-height:130px;padding:10px 13px;border:1px solid var(--line);border-radius:20px;
+  font:inherit;background:#fff;resize:none;outline:none}
+#in:focus{border-color:#bbb}
+#send{width:42px;height:42px;flex:0 0 42px;border:0;border-radius:50%;background:var(--ink);color:var(--cream);font-size:18px}
+#send:disabled{opacity:.4}
+.tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:99px;background:#eef7f2;color:#1E9070;margin-top:6px}
+a.link{color:var(--grey);font-size:12px;text-decoration:none;border-bottom:1px dotted var(--line)}
+@media (prefers-color-scheme:dark){
+  :root{--cream:#171816;--ink:#F1F2EE;--grey:#9a9a95;--line:rgba(241,242,238,.14)}
+  .m.patron{background:#1f211e}
+  #in{background:#1f211e;color:var(--ink)}
+  .q{background:#2a2519;border-color:#4a412a}
+  .m.err{background:#2e1c1c;border-color:#5a3030;color:#f0b9b9}
+}
+</style>
+</head>
+<body>
+<header>
+  <b>PATRON</b>
+  <span class="st"><span class="dot" id="dot"></span><span id="stat">bağlanıyor…</span></span>
+</header>
+<div id="board"></div>
+<div id="msgs"></div>
+<footer>
+  <textarea id="in" rows="1" placeholder="Patrona yaz…" enterkeyhint="send"></textarea>
+  <button id="send">↑</button>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const msgs = $('#msgs'), inp = $('#in'), send = $('#send'), board = $('#board');
+let busy = false, answered = new Set();
+
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const scroll = () => { msgs.scrollTop = msgs.scrollHeight; };
+
+// hafif markdown: kalın, başlık, madde. Önce kaçış — gelen metin HTML olarak yorumlanmaz.
+function md(s) {
+  return esc(s)
+    .replace(/^###?\s*(.+)$/gm, '<b>$1</b>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/^\s*[-*]\s+/gm, '• ');
+}
+function bubble(who, text, cls) {
+  const d = document.createElement('div');
+  d.className = 'm ' + (cls || who);
+  if ((cls || who) === 'patron') d.innerHTML = md(text); else d.textContent = text;
+  msgs.appendChild(d); scroll(); return d;
+}
+
+/* --- pano: GERÇEK sayılar, sunucudan --- */
+async function refreshBoard() {
+  try {
+    const [h, t] = await Promise.all([
+      fetch('/api/health').then(r => r.json()),
+      fetch('/api/tasks').then(r => r.json()),
+    ]);
+    $('#dot').classList.add('on');
+    $('#stat').textContent = h.name + ' · bağlı';
+    const c = s => t.filter(x => x.state === s).length;
+    board.classList.add('on');
+    board.innerHTML =
+      `<div class="r"><span>Koşan</span><b>${c('doing')}</b>` +
+      `<span>Sırada</span><b>${c('next')}</b>` +
+      `<span>Soru bekleyen</span><b>${c('waiting')}</b>` +
+      `<span>Biten</span><b>${c('done')}</b>` +
+      `<span style="margin-left:auto"><a class="link" href="/">3B ofis</a></span></div>`;
+    showQuestions(t);
+    runPending(t);
+  } catch (e) {
+    $('#dot').classList.remove('on');
+    $('#stat').textContent = 'ofise ulaşılamıyor';
+    board.classList.remove('on');
+  }
+}
+
+/* --- ajan sana soru sorduysa, telefondan cevapla --- */
+function showQuestions(tasks) {
+  for (const t of tasks.filter(x => x.state === 'waiting')) {
+    if (document.querySelector('[data-q="' + t.id + '"]') || answered.has(t.id)) continue;
+    const d = document.createElement('div');
+    d.className = 'q'; d.dataset.q = t.id;
+    d.innerHTML = '<div class="who">' + esc(t.agentName || t.agent) + ' soruyor</div>' +
+      '<div class="t">' + esc(t.question || t.title) + '</div>' +
+      '<input placeholder="cevabın…"><button>Gönder</button>';
+    const inEl = d.querySelector('input'), btn = d.querySelector('button');
+    const go = async () => {
+      const v = inEl.value.trim(); if (!v) return;
+      btn.disabled = true; inEl.disabled = true;
+      try {
+        await fetch('/api/tasks/' + t.id + '/answer', { method: 'POST',
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answer: v }) });
+        answered.add(t.id);
+        d.innerHTML = '<div class="who">' + esc(t.agentName || t.agent) + '</div><div class="t">✓ cevabın gitti: ' + esc(v) + '</div>';
+        refreshBoard();
+      } catch (e) { btn.disabled = false; inEl.disabled = false; }
+    };
+    btn.onclick = go;
+    inEl.onkeydown = e => { if (e.key === 'Enter') go(); };
+    msgs.appendChild(d); scroll();
+  }
+}
+
+/* --- patronun verdiği işler sırada bekliyorsa telefondan da koşsun --- */
+let running = false;
+async function runPending(tasks) {
+  if (running) return;
+  const next = tasks.find(t => t.state === 'next');
+  if (!next) return;
+  running = true;
+  const note = bubble('sys', (next.agentName || next.agent) + ' çalışıyor: ' + next.title, 'sys');
+  try {
+    const r = await fetch('/api/tasks/' + next.id + '/run', { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: '{}' });
+    const j = await r.json();
+    note.remove();
+    if (typeof j.error === 'string') bubble('', '⚠ ' + j.error, 'err');
+    else if (j.error === true) bubble('', '⚠ ' + (j.result || 'olmadı'), 'err');
+    else if (j.state === 'waiting') { /* soru: showQuestions basacak */ }
+    else if (j.result) bubble('patron', (next.agentName || next.agent) + ':\n\n' + j.result);
+  } catch (e) { note.remove(); bubble('', '⚠ ' + e.message, 'err'); }
+  running = false;
+  refreshBoard();
+}
+
+/* --- sohbet --- */
+async function loadHistory() {
+  try {
+    const j = await fetch('/api/patron').then(r => r.json());
+    msgs.innerHTML = '';
+    if (!j.history.length) bubble('patron', 'Buradayım. Ne yapalım?');
+    for (const m of j.history) bubble(m.who === 'sen' ? 'sen' : 'patron', m.text);
+  } catch (e) { bubble('', 'Ofise ulaşılamadı. Bilgisayar açık mı?', 'err'); }
+}
+
+async function submit() {
+  const text = inp.value.trim();
+  if (!text || busy) return;
+  busy = true; send.disabled = true;
+  inp.value = ''; inp.style.height = 'auto';
+  bubble('sen', text);
+  const wait = bubble('sys', 'patron düşünüyor…', 'sys');
+  try {
+    const r = await fetch('/api/patron', { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    const j = await r.json();
+    wait.remove();
+    if (j.error) bubble('', '⚠ ' + j.error, 'err');
+    else bubble('patron', j.reply);
+  } catch (e) { wait.remove(); bubble('', '⚠ ' + e.message, 'err'); }
+  busy = false; send.disabled = false;
+  refreshBoard();
+}
+
+send.onclick = submit;
+inp.addEventListener('input', () => { inp.style.height = 'auto'; inp.style.height = Math.min(130, inp.scrollHeight) + 'px'; });
+inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } });
+
+loadHistory();
+refreshBoard();
+setInterval(refreshBoard, 5000);
+</script>
+</body>
+</html>

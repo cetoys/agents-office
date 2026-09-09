@@ -38,6 +38,7 @@ import { Ops } from './ops.mjs'; // V3.4-ops: token ledger, budgets, agent score
 import { rowFromUsage } from './usage.mjs';
 import { loadEngines, callEngine } from './engines.mjs'; // bir ajan, bir motor
 import { loadPreflight, check as preflightCheck } from './preflight.mjs'; // uydurmayı kesen ön kapı
+import * as patron from './patron.mjs'; // tek muhatap: sen patronla konuşursun, işi o dağıtır
 
 const cfg = loadConfig();
 const HTML = path.join(ROOT, 'dist', 'command-centre-v2.html'); // built by build.mjs; shipped so npm start works without a build
@@ -299,7 +300,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(fs.readFileSync(path.join(ROOT, 'ops.html'), 'utf8'));
     }
-    if (url.pathname === '/api/tasks' && req.method === 'GET') return json(res, 200, load());
+    if (url.pathname === '/api/tasks' && req.method === 'GET')
+      return json(res, 200, load().map(t => ({ ...t, agentName: AGENTS.find(a => a.id === t.agent)?.name || t.agent })));
     if (url.pathname === '/api/tasks' && req.method === 'POST') {
       const { dept, text } = await body(req);
       if (!DEPTS[dept] || dept === 'brain') return json(res, 400, { error: 'unknown department' });
@@ -438,6 +440,73 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { brief, why: plan.why || '', steps: done, summary,
         waiting: done.filter(d => d.waiting).map(d => ({ id: d.id, agent: d.agent, question: d.question })) });
     }
+    /* ---------- PATRON: tek muhatap ----------
+       Sen 35 ajanla tek tek konuşmuyorsun. Patronla konuşuyorsun; işi o dağıtıyor,
+       sonucu o topluyor. Sohbet sunucuda durur — telefondan da masaüstünden de aynı sohbet. */
+    if (url.pathname === '/api/patron' && req.method === 'GET')
+      return json(res, 200, { history: patron.readHistory(DATA), name: cfg.name });
+
+    if (url.pathname === '/api/patron' && req.method === 'DELETE') {
+      patron.clearHistory(DATA);
+      return json(res, 200, { ok: true });
+    }
+
+    if (url.pathname === '/api/patron' && req.method === 'POST') {
+      const { text } = await body(req);
+      if (!text || !String(text).trim()) return json(res, 400, { error: 'boş mesaj' });
+      const msg = String(text).trim();
+      refreshSkills();
+
+      const hist = patron.readHistory(DATA);
+      hist.push({ who: 'sen', text: msg, ts: Date.now() });
+
+      const list = load();
+      const board = patron.boardText({ tasks: list, agents: AGENTS, depts: DEPTS, ops: ops.report() });
+      const rosterTxt = AGENTS.map(a => `${a.id} · ${a.name} (${DEPTS[a.department].name}) — ${a.does}`).join('\n');
+      const business = businessContext(ownerIndex()); // SADECE senin notların — ajan çıktısı değil
+      const system = patron.systemPrompt({ name: cfg.name, board, roster: rosterTxt, business });
+      const convo = hist.slice(-10).map(m => `${m.who === 'sen' ? 'SAHİBİ' : 'PATRON'}: ${m.text}`).join('\n');
+
+      let raw;
+      try { raw = await ask(system, convo + '\nPATRON:', { maxTokens: 1400, timeout: 240000, agent: '_office' }); }
+      catch (e) {
+        patron.writeHistory(DATA, hist);
+        return json(res, 500, { error: 'patron cevap veremedi: ' + e.message });
+      }
+
+      const { reply, orders } = patron.harvestOrders(raw, DEPT_KEYS);
+
+      // GÖREV satırlarını GERÇEK göreve çevir — aynı yönlendirici, aynı bütçe, aynı defter.
+      const created = [];
+      for (const o of orders) {
+        try {
+          const r = await route(o.dept, o.text);
+          const task = { id: nid(), dept: o.dept, agent: r.agent, title: r.title, text: o.text,
+            plan: r.plan, eta: r.eta, why: r.why, state: 'next', addedAt: Date.now(), by: 'patron' };
+          const l = load(); l.push(task); save(l);
+          const ag = AGENTS.find(x => x.id === r.agent);
+          created.push({ id: task.id, agent: r.agent, agentName: ag?.name || r.agent, dept: o.dept, title: r.title });
+          bb.write(ROOT, { agent: 'boss', agentName: 'PATRON', kind: 'karar', text: `${ag?.name || r.agent} → ${r.title}` });
+        } catch (e) {
+          created.push({ error: 'dağıtılamadı: ' + e.message, dept: o.dept, title: o.text });
+        }
+      }
+
+      const full = reply + (created.length
+        ? '\n\n' + created.map(c => c.error ? `⚠ ${c.title} — ${c.error}` : `→ ${c.agentName}: ${c.title}`).join('\n')
+        : '');
+      hist.push({ who: 'patron', text: full, ts: Date.now(), tasks: created.filter(c => !c.error) });
+      patron.writeHistory(DATA, hist);
+      return json(res, 200, { reply: full, tasks: created, history: hist.slice(-10) });
+    }
+
+    // Telefon için sade sayfa — 3B ofis mobilde ağır; burası sadece patron sohbeti.
+    if (url.pathname === '/patron' || url.pathname === '/telefon') {
+      const p = path.join(ROOT, 'patron.html');
+      if (fs.existsSync(p)) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(fs.readFileSync(p)); }
+      return json(res, 404, { error: 'patron.html yok' });
+    }
+
     json(res, 404, { error: 'not found' });
   } catch (e) { console.error(e); json(res, 500, { error: e.message }); }
 });
